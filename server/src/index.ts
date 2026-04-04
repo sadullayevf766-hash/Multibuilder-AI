@@ -15,7 +15,10 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
-const geminiParser = new GeminiParser(process.env.GEMINI_API_KEY || '');
+const geminiParser = new GeminiParser(
+  process.env.GEMINI_API_KEY || '',
+  process.env.GROQ_API_KEY || ''
+);
 const floorPlanEngine = new FloorPlanEngine();
 const pdfExporter = new PdfExporter();
 
