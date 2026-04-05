@@ -244,18 +244,16 @@ export class FloorPlanEngine {
         position = this.placeSequential(wall, wallCursors, dims);
       }
 
-      // Boundary clamp
+      // Boundary clamp — fixture MUST stay inside room
       const WALL_T = WALL_THICKNESS;
-      const GAP = 8;
+      const GAP = 5;
       const minX = WALL_T + GAP;
       const minY = WALL_T + GAP;
-      let maxX = (roomWidth * UNITS_PER_METER) - dims.w - WALL_T - GAP;
-      let maxY = (roomLength * UNITS_PER_METER) - dims.h - WALL_T - GAP;
-      if (maxX < minX) maxX = minX;
-      if (maxY < minY) maxY = minY;
+      const maxX = (roomWidth  * UNITS_PER_METER) - dims.w - WALL_T - GAP;
+      const maxY = (roomLength * UNITS_PER_METER) - dims.h - WALL_T - GAP;
 
-      position.x = Math.max(minX, Math.min(position.x, maxX));
-      position.y = Math.max(minY, Math.min(position.y, maxY));
+      position.x = Math.max(minX, Math.min(position.x, Math.max(minX, maxX)));
+      position.y = Math.max(minY, Math.min(position.y, Math.max(minY, maxY)));
 
       placed.push({
         id: fixture.id,
@@ -269,44 +267,58 @@ export class FloorPlanEngine {
   }
 
   private placeAtOffset(wall: Wall, offsetMeters: number, dims: { w: number; h: number }): Point {
-    const offsetUnits = offsetMeters * UNITS_PER_METER;
+    const offsetUnits = Math.max(0, offsetMeters * UNITS_PER_METER);
+    const T = WALL_THICKNESS;
 
-    if (wall.side === 'north') {
-      // North wall: start.x=0, end.x=roomWidth → offset from west corner
-      return { x: wall.start.x + offsetUnits, y: wall.start.y + WALL_THICKNESS };
+    switch (wall.side) {
+      case 'north':
+        // North wall: y=0, fixtures go DOWN from wall
+        return {
+          x: wall.start.x + offsetUnits,
+          y: wall.start.y + T
+        };
+      case 'south':
+        // South wall: y=roomLength, fixtures go UP from wall
+        return {
+          x: wall.end.x + offsetUnits,   // end.x = 0 (west corner of south wall)
+          y: wall.start.y - T - dims.h   // wall.start.y = roomLength
+        };
+      case 'west':
+        // West wall: x=0, fixtures go RIGHT from wall
+        return {
+          x: wall.start.x + T,
+          y: wall.end.y + offsetUnits    // end.y = 0 (north corner of west wall)
+        };
+      case 'east':
+        // East wall: x=roomWidth, fixtures go LEFT from wall
+        return {
+          x: wall.start.x - T - dims.w,
+          y: wall.start.y + offsetUnits  // start.y = 0 (north corner of east wall)
+        };
     }
-    if (wall.side === 'south') {
-      // South wall: start.x=roomWidth, end.x=0 → offset from west corner (end.x side)
-      return { x: wall.end.x + offsetUnits, y: wall.start.y - WALL_THICKNESS - dims.h };
-    }
-    if (wall.side === 'west') {
-      // West wall: start.y=roomLength, end.y=0 → offset from north corner (end.y side)
-      return { x: wall.start.x + WALL_THICKNESS, y: wall.end.y + offsetUnits };
-    }
-    // East wall: start.y=0, end.y=roomLength → offset from north corner
-    return { x: wall.start.x - WALL_THICKNESS - dims.w, y: wall.start.y + offsetUnits };
   }
 
   private placeSequential(wall: Wall, cursors: Record<string, number>, dims: { w: number; h: number }): Point {
     const cursor = cursors[wall.side] || (WALL_THICKNESS + 8);
-
+    const T = WALL_THICKNESS;
     let position: Point;
 
-    if (wall.side === 'north') {
-      position = { x: wall.start.x + cursor, y: wall.start.y + WALL_THICKNESS };
-      cursors[wall.side] = cursor + dims.w + 10;
-    } else if (wall.side === 'south') {
-      // South wall offset from west (end.x) corner
-      position = { x: wall.end.x + cursor, y: wall.start.y - WALL_THICKNESS - dims.h };
-      cursors[wall.side] = cursor + dims.w + 10;
-    } else if (wall.side === 'west') {
-      // West wall offset from north (end.y) corner
-      position = { x: wall.start.x + WALL_THICKNESS, y: wall.end.y + cursor };
-      cursors[wall.side] = cursor + dims.h + 10;
-    } else {
-      // East wall offset from north (start.y) corner
-      position = { x: wall.start.x - WALL_THICKNESS - dims.w, y: wall.start.y + cursor };
-      cursors[wall.side] = cursor + dims.h + 10;
+    switch (wall.side) {
+      case 'north':
+        position = { x: wall.start.x + cursor, y: wall.start.y + T };
+        cursors[wall.side] = cursor + dims.w + 10;
+        break;
+      case 'south':
+        position = { x: wall.end.x + cursor, y: wall.start.y - T - dims.h };
+        cursors[wall.side] = cursor + dims.w + 10;
+        break;
+      case 'west':
+        position = { x: wall.start.x + T, y: wall.end.y + cursor };
+        cursors[wall.side] = cursor + dims.h + 10;
+        break;
+      default: // east
+        position = { x: wall.start.x - T - dims.w, y: wall.start.y + cursor };
+        cursors[wall.side] = cursor + dims.h + 10;
     }
 
     return position;

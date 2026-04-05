@@ -9,7 +9,8 @@ const FIXTURE_LABELS: Record<string, string> = {
   sink: 'Lavabo', toilet: 'Hojatxona', bathtub: 'Vanna', shower: 'Dush',
   stove: 'Plita', fridge: 'Muzlatgich', dishwasher: 'Idish yuv.',
   desk: 'Stol', bed: 'Karavot', wardrobe: 'Shkaf',
-  sofa: 'Divan', tv_unit: 'TV', bookshelf: 'Kitob javon'
+  sofa: 'Divan', tv_unit: 'TV', bookshelf: 'Kitob javon',
+  armchair: 'Kreslo', coffee_table: 'Jurnal stol', dining_table: 'Ovqat stoli'
 };
 
 const ROOM_COLORS: Record<string, string> = {
@@ -278,6 +279,36 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
             <Line points={[x+20, y, x+20, y+30]} stroke="#1a1a1a" strokeWidth={0.5} />
             <Line points={[x+40, y, x+40, y+30]} stroke="#1a1a1a" strokeWidth={0.5} />
             <Line points={[x+60, y, x+60, y+30]} stroke="#1a1a1a" strokeWidth={0.5} />
+          </Group>
+        );
+
+      case 'armchair':
+        return (
+          <Group key={fixture.id}>
+            <Rect x={x} y={y} width={80} height={80} fill="#e8e8e8" stroke="#1a1a1a" strokeWidth={1.5} cornerRadius={5} />
+            <Rect x={x} y={y} width={80} height={18} fill="#d0d0d0" stroke="#1a1a1a" strokeWidth={1} />
+            <Rect x={x} y={y+18} width={10} height={62} fill="#c0c0c0" stroke="#1a1a1a" strokeWidth={0.5} />
+            <Rect x={x+70} y={y+18} width={10} height={62} fill="#c0c0c0" stroke="#1a1a1a" strokeWidth={0.5} />
+          </Group>
+        );
+
+      case 'coffee_table':
+        return (
+          <Group key={fixture.id}>
+            <Rect x={x} y={y} width={90} height={50} fill="#f0ebe0" stroke="#1a1a1a" strokeWidth={1.5} cornerRadius={3} />
+            <Rect x={x+5} y={y+5} width={80} height={40} fill="none" stroke="#1a1a1a" strokeWidth={0.5} cornerRadius={2} />
+          </Group>
+        );
+
+      case 'dining_table':
+        return (
+          <Group key={fixture.id}>
+            <Rect x={x} y={y} width={120} height={80} fill="#f5f0e8" stroke="#1a1a1a" strokeWidth={1.5} cornerRadius={3} />
+            {/* Chairs around table */}
+            <Rect x={x+20} y={y-15} width={30} height={12} fill="#e0e0e0" stroke="#1a1a1a" strokeWidth={0.5} />
+            <Rect x={x+70} y={y-15} width={30} height={12} fill="#e0e0e0" stroke="#1a1a1a" strokeWidth={0.5} />
+            <Rect x={x+20} y={y+83} width={30} height={12} fill="#e0e0e0" stroke="#1a1a1a" strokeWidth={0.5} />
+            <Rect x={x+70} y={y+83} width={30} height={12} fill="#e0e0e0" stroke="#1a1a1a" strokeWidth={0.5} />
           </Group>
         );
 
