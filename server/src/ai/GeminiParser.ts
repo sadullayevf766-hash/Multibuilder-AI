@@ -68,7 +68,8 @@ interface ArchitectResponse {
 export class GeminiParser {
   private geminiKey: string;
   private groqKey: string;
-  private cache = new Map<string, RoomSpec | FloorPlan>();
+  private cache = new Map<string, { result: RoomSpec | FloorPlan; time: number }>();
+  private CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
   constructor(geminiKey: string, groqKey?: string) {
     this.geminiKey = geminiKey;
@@ -77,19 +78,19 @@ export class GeminiParser {
 
   async parseDescription(description: string): Promise<RoomSpec | FloorPlan> {
     const cacheKey = description.toLowerCase().trim();
+    const cached = this.cache.get(cacheKey);
 
-    if (this.cache.has(cacheKey)) {
+    if (cached && Date.now() - cached.time < this.CACHE_TTL) {
       console.log('[PARSER] Cache hit');
-      return this.cache.get(cacheKey)!;
+      return cached.result;
     }
-
     // 1. Try Groq (free, fast — 14,400 req/day)
     if (this.groqKey) {
       try {
         const parsed = await this.callGroq(description);
         const result = this.convertArchitectJSON(parsed, description);
         console.log('[MODE] LIVE via Groq');
-        this.cache.set(cacheKey, result);
+        this.cache.set(cacheKey, { result, time: Date.now() });
         return result;
       } catch (err) {
         console.log('[GROQ] Failed:', (err as Error).message, '— trying Gemini...');
@@ -102,7 +103,7 @@ export class GeminiParser {
         const parsed = await this.callGeminiWithRetry(description);
         const result = this.convertArchitectJSON(parsed, description);
         console.log('[MODE] LIVE via Gemini');
-        this.cache.set(cacheKey, result);
+        this.cache.set(cacheKey, { result, time: Date.now() });
         return result;
       } catch (err) {
         console.log('[GEMINI] Failed:', (err as Error).message, '— using smart demo...');
@@ -112,7 +113,7 @@ export class GeminiParser {
     // 3. Smart local architect (no AI)
     console.log('[MODE] DEMO — local smart parser');
     const result = this.smartLocalParse(description);
-    this.cache.set(cacheKey, result);
+    this.cache.set(cacheKey, { result, time: Date.now() });
     return result;
   }
 
