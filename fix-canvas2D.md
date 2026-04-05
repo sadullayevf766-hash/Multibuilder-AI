@@ -1,8 +1,9 @@
-import { Stage, Layer, Line, Circle, Rect, Text as KonvaText, Group, Arrow, Arc } from 'react-konva';
+import { Stage, Layer, Line, Circle, Rect, Text, Group, Arrow, Arc } from 'react-konva';
 import type { DrawingData, Wall, PlacedFixture, Pipe, DimensionLine, DoorSpec } from '../../../shared/types';
 import ToiletSymbol from './symbols/ToiletSymbol';
 import SinkSymbol from './symbols/SinkSymbol';
 import BathtubSymbol from './symbols/BathtubSymbol';
+
 import ShowerSymbol from './symbols/ShowerSymbol';
 
 const FIXTURE_LABELS: Record<string, string> = {
@@ -140,33 +141,25 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
     );
   };
 
-  const FIXTURE_LABELS_UZ: Record<string, string> = {
-    sink: 'Lavabo', toilet: 'Hojatxona', bathtub: 'Vanna',
-    shower: 'Dush', stove: 'Plita', fridge: 'Muzlatgich',
-    dishwasher: 'Idish yuv.', desk: 'Stol', bed: 'Karavot',
-    wardrobe: 'Shkaf', sofa: 'Divan', tv_unit: 'TV',
-    bookshelf: 'Kitob javon'
-  };
-
   const renderFixtureLabel = (fixture: PlacedFixture) => {
     const { type, position } = fixture;
     const label = FIXTURE_LABELS[type] || type;
-    const dims: Record<string, {w:number; h:number}> = {
+    const dims: Record<string, {w:number,h:number}> = {
       sink:{w:60,h:50}, toilet:{w:40,h:70}, bathtub:{w:80,h:180},
       shower:{w:90,h:90}, stove:{w:60,h:60}, fridge:{w:60,h:65},
       dishwasher:{w:60,h:60}, desk:{w:120,h:60}, bed:{w:160,h:200},
       wardrobe:{w:120,h:60}, sofa:{w:200,h:90}, tv_unit:{w:150,h:45},
       bookshelf:{w:90,h:30}
     };
-    const d = dims[type] || {w:50, h:50};
-    const cx = position.x + CANVAS_PADDING + d.w / 2;
-    const cy = position.y + CANVAS_PADDING + d.h / 2 + 2;
+    const d = dims[type] || {w:50,h:50};
+    const cx = position.x + CANVAS_PADDING + d.w/2;
+    const cy = position.y + CANVAS_PADDING + d.h/2 + 2;
     const fontSize = d.w < 60 ? 7 : 8;
     return (
-      <KonvaText
+      <Text
         key={fixture.id + '-label'}
         x={cx - 20}
-        y={cy - fontSize / 2}
+        y={cy - fontSize/2}
         text={label}
         fontSize={fontSize}
         fill="#444"
@@ -285,7 +278,7 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
         return (
           <Group key={fixture.id}>
             <Rect x={x} y={y} width={50} height={50} fill="#f0f0f0" stroke="#1a1a1a" strokeWidth={1} />
-            <KonvaText x={x+5} y={y+18} text={FIXTURE_LABELS_UZ[type] || type} fontSize={9} fill="#555" />
+            <Text x={x+5} y={y+18} text={type} fontSize={9} fill="#555" />
           </Group>
         );
     }
@@ -440,7 +433,7 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
           pointerWidth={8}
           pointerAtBeginning
         />
-        <KonvaText
+        <Text
           x={midX + nx * offset - 20}
           y={midY + ny * offset - 15}
           text={dim.label}
@@ -459,10 +452,10 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
     return (
       <Group>
         <Rect x={blockX} y={blockY} width={200} height={70} stroke="#1a1a1a" strokeWidth={1} fill="white" />
-        <KonvaText x={blockX + 8} y={blockY + 8}  text="Floor Plan" fontSize={12} fontFamily="monospace" fontStyle="bold" />
-        <KonvaText x={blockX + 8} y={blockY + 24} text="Masshtab: 1:50" fontSize={10} fontFamily="monospace" />
-        <KonvaText x={blockX + 8} y={blockY + 38} text={`Sana: ${date}`} fontSize={10} fontFamily="monospace" />
-        <KonvaText x={blockX + 8} y={blockY + 52} text="SNiP 2.04.01-85" fontSize={10} fontFamily="monospace" fill="#555" />
+        <Text x={blockX + 8} y={blockY + 8}  text="Floor Plan" fontSize={12} fontFamily="monospace" fontStyle="bold" />
+        <Text x={blockX + 8} y={blockY + 24} text="Masshtab: 1:50" fontSize={10} fontFamily="monospace" />
+        <Text x={blockX + 8} y={blockY + 38} text={`Sana: ${date}`} fontSize={10} fontFamily="monospace" />
+        <Text x={blockX + 8} y={blockY + 52} text="SNiP 2.04.01-85" fontSize={10} fontFamily="monospace" fill="#555" />
       </Group>
     );
   };
@@ -474,11 +467,11 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
     return (
       <Group>
         <Line points={[lx, ly + 8, lx + 30, ly + 8]} stroke="#3b82f6" strokeWidth={2} opacity={0.8} />
-        <KonvaText x={lx + 36} y={ly} text="Sovuq suv (H)" fontSize={10} fontFamily="monospace" />
+        <Text x={lx + 36} y={ly} text="Sovuq suv (H)" fontSize={10} fontFamily="monospace" />
         <Line points={[lx, ly + 24, lx + 30, ly + 24]} stroke="#ef4444" strokeWidth={2} opacity={0.8} />
-        <KonvaText x={lx + 36} y={ly + 16} text="Issiq suv (I)" fontSize={10} fontFamily="monospace" />
+        <Text x={lx + 36} y={ly + 16} text="Issiq suv (I)" fontSize={10} fontFamily="monospace" />
         <Line points={[lx, ly + 40, lx + 30, ly + 40]} stroke="#64748b" strokeWidth={1.5} dash={[4, 4]} opacity={0.6} />
-        <KonvaText x={lx + 36} y={ly + 32} text="Kanalizatsiya (K)" fontSize={10} fontFamily="monospace" />
+        <Text x={lx + 36} y={ly + 32} text="Kanalizatsiya (K)" fontSize={10} fontFamily="monospace" />
       </Group>
     );
   };

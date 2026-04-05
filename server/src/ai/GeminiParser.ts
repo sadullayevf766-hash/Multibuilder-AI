@@ -15,6 +15,7 @@ interface ArchitectFixture {
   priority?: 'essential' | 'recommended' | 'optional';
   clearanceNeeded?: number;
   count?: number;
+  reason?: string;
 }
 
 interface ArchitectDoor {
@@ -38,8 +39,10 @@ interface ArchitectResponse {
   dimensions?: { width: number; length: number };
   analysis?: {
     totalArea?: number;
-    functionalZones?: Array<{ name: string; description: string; wallSide: string }>;
+    primaryZone?: string;
     trafficFlow?: string;
+    designDecisions?: string[];
+    functionalZones?: Array<{ name: string; description: string; wallSide: string }>;
     specialRequirements?: string[];
   };
   fixtures?: ArchitectFixture[];
@@ -286,6 +289,9 @@ export class GeminiParser {
 
     if (p.designNotes?.length) {
       console.log('[ARCHITECT NOTES]', p.designNotes.join(' | '));
+    }
+    if (p.analysis?.designDecisions?.length) {
+      console.log('[ARCHITECT DECISIONS]', p.analysis.designDecisions.join(' | '));
     }
     console.log('[PARSER OUTPUT]', JSON.stringify(result, null, 2));
     return result;
