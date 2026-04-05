@@ -362,9 +362,9 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
     if (wall.side === 'north') {
       const dx = midX - halfDoor;
       openingPoints = [dx, P, dx + doorWidth, P + WALL_T];
-      arcX = dx;
+      arcX = dx + doorWidth;  // arc starts from right edge of door
       arcY = P + WALL_T;
-      arcRotation = -90;
+      arcRotation = 180;  // arc swings INTO room (downward)
     } else if (wall.side === 'south') {
       const dx = midX - halfDoor;
       openingPoints = [dx, roomH - WALL_T, dx + doorWidth, roomH];

@@ -236,6 +236,19 @@ export class FloorPlanEngine {
       const wall = walls.find(w => w.side === fixture.wall);
       if (!wall) continue;
 
+      // Override: toilet always south, bathtub always east or west (longest wall)
+      if (fixture.type === 'toilet' && fixture.wall === 'north') {
+        const southWall = walls.find(w => w.side === 'south');
+        if (southWall) fixture.wall = 'south';
+      }
+      if (fixture.type === 'bathtub' && (fixture.wall === 'north' || fixture.wall === 'south')) {
+        // Bathtub on longest wall
+        const eastWall = walls.find(w => w.side === 'east');
+        if (eastWall) fixture.wall = 'east';
+      }
+
+      const correctedWall = walls.find(w => w.side === fixture.wall) || wall;
+
       const fixtureDimsLocal: Record<string, { w: number; h: number }> = {
         sink: { w: 60, h: 50 }, toilet: { w: 40, h: 70 }, bathtub: { w: 70, h: 170 },
         shower: { w: 90, h: 90 }, stove: { w: 60, h: 60 }, fridge: { w: 60, h: 65 },
@@ -249,13 +262,11 @@ export class FloorPlanEngine {
 
       // AI offsetFromCorner → absolut koordinata
       if (fixture.offsetFromCorner !== undefined) {
-        position = this.placeAtOffset(wall, fixture.offsetFromCorner, dims);
+        position = this.placeAtOffset(correctedWall, fixture.offsetFromCorner, dims);
       } else if (fixture.type === 'sink' && fixture.wall === 'north') {
-        // Default sink: 0.5m from west corner
-        position = this.placeAtOffset(wall, 0.5, dims);
+        position = this.placeAtOffset(correctedWall, 0.5, dims);
       } else {
-        // Sequential cursor placement
-        position = this.placeSequential(wall, wallCursors, dims);
+        position = this.placeSequential(correctedWall, wallCursors, dims);
       }
 
       // Boundary clamp — fixture MUST stay inside room
