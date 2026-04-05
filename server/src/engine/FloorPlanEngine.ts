@@ -216,7 +216,21 @@ export class FloorPlanEngine {
       if (!fixture.wall) {
         if (fixture.type === 'toilet') fixture.wall = 'south';
         else if (fixture.type === 'sink') fixture.wall = 'north';
-        else continue;
+        else if (fixture.type === 'coffee_table') {
+          // Coffee table: center of room, in front of sofa
+          const cx = (roomWidth * UNITS_PER_METER) / 2 - 45;
+          const cy = (roomLength * UNITS_PER_METER) * 0.65;
+          placed.push({ id: fixture.id, type: fixture.type, position: { x: cx, y: cy }, wall: 'south' });
+          continue;
+        } else if (fixture.type === 'dining_table') {
+          // Dining table: center of room
+          const cx = (roomWidth * UNITS_PER_METER) / 2 - 60;
+          const cy = (roomLength * UNITS_PER_METER) / 2 - 40;
+          placed.push({ id: fixture.id, type: fixture.type, position: { x: cx, y: cy }, wall: 'north' });
+          continue;
+        } else {
+          continue;
+        }
       }
 
       const wall = walls.find(w => w.side === fixture.wall);

@@ -483,33 +483,37 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
   };
 
   const renderTitleBlock = () => {
-    const blockX = totalWidth + CANVAS_PADDING - 220;
+    // Bottom-right corner, always visible
+    const blockW = 180;
+    const blockH = 70;
+    const blockX = Math.max(totalWidth + CANVAS_PADDING - blockW - 5, CANVAS_PADDING + 160);
     const blockY = totalHeight + CANVAS_PADDING + 25;
     const date = new Date().toLocaleDateString('uz-UZ');
 
     return (
       <Group>
-        <Rect x={blockX} y={blockY} width={200} height={70} stroke="#1a1a1a" strokeWidth={1} fill="white" />
-        <KonvaText x={blockX + 8} y={blockY + 8}  text="Floor Plan" fontSize={12} fontFamily="monospace" fontStyle="bold" />
-        <KonvaText x={blockX + 8} y={blockY + 24} text="Masshtab: 1:50" fontSize={10} fontFamily="monospace" />
-        <KonvaText x={blockX + 8} y={blockY + 38} text={`Sana: ${date}`} fontSize={10} fontFamily="monospace" />
-        <KonvaText x={blockX + 8} y={blockY + 52} text="SNiP 2.04.01-85" fontSize={10} fontFamily="monospace" fill="#555" />
+        <Rect x={blockX} y={blockY} width={blockW} height={blockH} stroke="#1a1a1a" strokeWidth={1} fill="white" />
+        <KonvaText x={blockX + 8} y={blockY + 8}  text="Floor Plan" fontSize={11} fontFamily="monospace" fontStyle="bold" />
+        <KonvaText x={blockX + 8} y={blockY + 24} text="Masshtab: 1:50" fontSize={9} fontFamily="monospace" />
+        <KonvaText x={blockX + 8} y={blockY + 38} text={`Sana: ${date}`} fontSize={9} fontFamily="monospace" />
+        <KonvaText x={blockX + 8} y={blockY + 52} text="SNiP 2.04.01-85" fontSize={9} fontFamily="monospace" fill="#555" />
       </Group>
     );
   };
 
   const renderLegend = () => {
+    // Bottom-left corner
     const lx = CANVAS_PADDING;
     const ly = totalHeight + CANVAS_PADDING + 25;
 
     return (
       <Group>
-        <Line points={[lx, ly + 8, lx + 30, ly + 8]} stroke="#3b82f6" strokeWidth={2} opacity={0.8} />
-        <KonvaText x={lx + 36} y={ly} text="Sovuq suv (H)" fontSize={10} fontFamily="monospace" />
-        <Line points={[lx, ly + 24, lx + 30, ly + 24]} stroke="#ef4444" strokeWidth={2} opacity={0.8} />
-        <KonvaText x={lx + 36} y={ly + 16} text="Issiq suv (I)" fontSize={10} fontFamily="monospace" />
-        <Line points={[lx, ly + 40, lx + 30, ly + 40]} stroke="#64748b" strokeWidth={1.5} dash={[4, 4]} opacity={0.6} />
-        <KonvaText x={lx + 36} y={ly + 32} text="Kanalizatsiya (K)" fontSize={10} fontFamily="monospace" />
+        <Line points={[lx, ly + 8, lx + 25, ly + 8]} stroke="#3b82f6" strokeWidth={2} opacity={0.8} />
+        <KonvaText x={lx + 30} y={ly + 2} text="Sovuq suv (H)" fontSize={9} fontFamily="monospace" />
+        <Line points={[lx, ly + 22, lx + 25, ly + 22]} stroke="#ef4444" strokeWidth={2} opacity={0.8} />
+        <KonvaText x={lx + 30} y={ly + 16} text="Issiq suv (I)" fontSize={9} fontFamily="monospace" />
+        <Line points={[lx, ly + 36, lx + 25, ly + 36]} stroke="#64748b" strokeWidth={1.5} dash={[4, 4]} opacity={0.6} />
+        <KonvaText x={lx + 30} y={ly + 30} text="Kanalizatsiya (K)" fontSize={9} fontFamily="monospace" />
       </Group>
     );
   };
