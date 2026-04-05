@@ -385,9 +385,9 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
       // west
       const dy = midY - halfDoor;
       openingPoints = [P, dy, P + WALL_T, dy + doorWidth];
-      arcX = P + WALL_T;
-      arcY = dy + doorWidth;
-      arcRotation = 180;
+      arcX = P + WALL_T;  // inner wall surface
+      arcY = dy;           // top of door opening
+      arcRotation = 90;    // arc swings RIGHT into room
     }
 
     return (
@@ -412,7 +412,7 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
               ? [arcX, arcY, arcX + doorWidth, arcY]
               : wall.side === 'east'
                 ? [arcX, arcY, arcX, arcY - doorWidth]
-                : [arcX, arcY, arcX, arcY + doorWidth]
+                : [arcX, arcY, arcX, arcY + doorWidth]  // west: door leaf goes DOWN
           }
           stroke="#1a1a1a"
           strokeWidth={1.5}
