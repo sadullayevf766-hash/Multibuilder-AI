@@ -1,7 +1,8 @@
 # FloorPlan AI — Loyiha To'liq Holat Hisoboti
 
-**Sana:** 2026-04-03  
-**Test natijasi:** 33/33 test o'tdi ✅
+**Sana:** 2026-04-05  
+**Test natijasi:** 39/39 test o'tdi ✅  
+**AI holati:** LIVE via Groq (LLaMA 3.3-70b) ✅
 
 ---
 
@@ -15,12 +16,14 @@ Sun'iy intellekt yordamida xona rejalarini yaratuvchi full-stack TypeScript ilov
 
 | Qatlam | Texnologiya |
 |--------|-------------|
-| Frontend | React 18, Vite, TailwindCSS, Konva.js |
+| Frontend | React 18, Vite, TailwindCSS, Konva.js (react-konva@18.2.10) |
 | Backend | Express, TypeScript, Node.js 24 |
-| AI | Google Gemini 2.0 Flash |
+| AI (primary) | Groq — LLaMA 3.3-70b-versatile (bepul, 14,400 req/kun) |
+| AI (fallback) | Google Gemini 2.0 Flash |
+| AI (offline) | Smart local parser (regex-based) |
 | Auth & DB | Supabase |
 | Export | dxf-writer (DXF), custom PDF |
-| Test | Vitest |
+| Test | Vitest (39/39) |
 
 ---
 
@@ -32,7 +35,7 @@ Sun'iy intellekt yordamida xona rejalarini yaratuvchi full-stack TypeScript ilov
 │   └── src/
 │       ├── components/
 │       │   ├── Canvas2D.tsx   # Asosiy chizma komponenti (Konva.js)
-│       │   └── symbols/       # CAD symbollar
+│       │   └── symbols/       # ISO 128 / GOST CAD symbollar
 │       │       ├── ToiletSymbol.tsx
 │       │       ├── SinkSymbol.tsx
 │       │       ├── BathtubSymbol.tsx
@@ -49,19 +52,19 @@ Sun'iy intellekt yordamida xona rejalarini yaratuvchi full-stack TypeScript ilov
 │       │   ├── Generator.tsx  # Chizma yaratish
 │       │   └── Project.tsx    # Loyiha ko'rish
 │       └── lib/
-│           └── supabase.ts    # Supabase client
+│           └── supabase.ts
 │
 ├── server/                    # Express backend
 │   └── src/
 │       ├── ai/
-│       │   └── GeminiParser.ts    # AI parsing
+│       │   └── GeminiParser.ts    # Groq → Gemini → Smart local
 │       ├── engine/
 │       │   └── FloorPlanEngine.ts # Koordinata hisoblash
 │       ├── export/
-│       │   ├── DxfExporter.ts     # DXF export
+│       │   ├── DxfExporter.ts     # DXF export (dxf-writer)
 │       │   └── PdfExporter.ts     # PDF export
 │       ├── db/
-│       │   └── supabase.ts        # DB funksiyalar
+│       │   └── supabase.ts
 │       └── index.ts               # Express server
 │
 └── shared/
@@ -72,86 +75,73 @@ Sun'iy intellekt yordamida xona rejalarini yaratuvchi full-stack TypeScript ilov
 
 ## 4. ARXITEKTURA QOIDALARI
 
-- **Gemini HECH QACHON koordinata bermaydi** — faqat semantik JSON (wall, type, offset)
+- **AI HECH QACHON koordinata bermaydi** — faqat semantik JSON
 - **Barcha koordinatalar** faqat `FloorPlanEngine` da hisoblanadi
 - **1 metr = 100 birlik** koordinata tizimi
 - **TypeScript strict mode** — `any` tipi ishlatilmaydi
 
 ---
 
-## 5. ASOSIY MODULLAR
+## 5. AI PIPELINE
 
-### 5.1 GeminiParser (`server/src/ai/GeminiParser.ts`)
+```
+Foydalanuvchi matni
+        ↓
+1. Groq (LLaMA 3.3-70b) — bepul, tez, 14,400 req/kun
+        ↓ (xato bo'lsa)
+2. Gemini 2.0 Flash — retry 3x (15s/30s/45s)
+        ↓ (xato bo'lsa)
+3. Smart local parser — regex, o'zbek tilini tushunadi
+        ↓
+FloorPlanEngine → DrawingData → Canvas2D
+```
 
-**Vazifasi:** Tabiiy tilni strukturali JSON ga aylantirish
-
-**Xususiyatlar:**
-- Model: `gemini-2.0-flash`
-- In-memory cache (bir xil so'rovlar qayta yuborilmaydi)
-- Retry logic: 3 urinish, 15s/30s/45s kutish
-- 30 soniya timeout + AbortController
-- Demo mode: API key yo'q yoki xato bo'lsa mock data qaytaradi
-- Multi-room detection: "kvartira", "xonali" so'zlari bo'lsa FloorPlan qaytaradi
-
-**Demo mode aqlli:**
-- "oshxona" → stove + sink + fridge
-- "yotoqxona" → bed + wardrobe
-- "ofis" → desk + bookshelf
-- "mehmonxona" → sofa + tv_unit
-- "kvartira/2 xonali" → to'liq FloorPlan (5 xona)
-- "3 xonali" → to'liq FloorPlan (7 xona)
-
-**Qo'llab-quvvatlanadigan xona turlari:**
-`bathroom, kitchen, office, bedroom, living, apartment`
-
-**Qo'llab-quvvatlanadigan jihozlar:**
-`toilet, sink, bathtub, shower, stove, fridge, dishwasher, desk, bed, wardrobe, sofa, tv_unit, bookshelf`
+**Smart local parser qobiliyatlari:**
+- `"3x4 hammom"` → width:3, length:4
+- `"2 ta lavabo"` → 2 ta sink fixture
+- `"shimoliy deraza"` → window on north wall
+- `"katta oshxona"` → +1.5m dimensions
+- `"2 xonali kvartira"` → to'liq FloorPlan (5 xona)
+- `"3 xonali kvartira"` → to'liq FloorPlan (7 xona)
 
 ---
 
-### 5.2 FloorPlanEngine (`server/src/engine/FloorPlanEngine.ts`)
+## 6. ASOSIY MODULLAR
 
-**Vazifasi:** RoomSpec → DrawingData (barcha koordinatalar bu yerda)
+### 6.1 GeminiParser
+
+**Yangiliklar (v2):**
+- `ParsedRoom` interface — `count` field qo'llab-quvvatlaydi
+- `buildRoomSpec()` — fixture.count bilan bir nechta fixture
+- `buildFloorPlan()` — multi-room support
+- `smartLocalParse()` — AI siz ishlaydi
+- In-memory cache — bir xil so'rovlar qayta yuborilmaydi
+- Constructor: `new GeminiParser(geminiKey, groqKey)`
+
+### 6.2 FloorPlanEngine
 
 **Metodlar:**
-- `generateDrawing(roomSpec)` — bitta xona uchun
-- `generateFloorPlan(floorPlan)` — ko'p xonali reja
-- `generateWalls()` — 4 ta devor, 15 birlik qalinlik
-- `placeFixtures()` — jihozlarni devorga joylashtirish
-- `generatePipes()` — quvurlarni avtomatik yo'naltirish
-- `generateDimensions()` — o'lchov chiziqlari
-- `removeDuplicateWalls()` — umumiy devorlarni bir marta chizish
-
-**Quvur routing:**
-- Cold/hot: L-shape, devor bo'ylab gorizontal
-- Drain: sink → south wall ga vertikal; toilet → o'z devorga
-- Barcha quvurlar orthogonal (diagonal yo'q)
+- `generateDrawing(roomSpec)` — bitta xona
+- `generateFloorPlan(floorPlan)` — ko'p xonali, auto-layout, dedup walls
+- `generatePipes()` — cold/hot L-shape, drain vertikal
+- `placeFixtures()` — strict boundary check, fixture o'lchamiga qarab
 
 **Jihozlar o'lchamlari (birlik):**
-| Jihoz | Kenglik | Uzunlik |
-|-------|---------|---------|
-| sink | 60 | 50 |
-| toilet | 40 | 70 |
-| bathtub | 70 | 170 |
-| shower | 90 | 90 |
-| stove | 60 | 60 |
-| fridge | 60 | 65 |
-| desk | 120 | 60 |
-| bed | 160 | 200 |
-| wardrobe | 120 | 60 |
-| sofa | 200 | 90 |
-| tv_unit | 150 | 45 |
+| Jihoz | W | H | | Jihoz | W | H |
+|-------|---|---|-|-------|---|---|
+| sink | 60 | 50 | | stove | 60 | 60 |
+| toilet | 40 | 70 | | fridge | 60 | 65 |
+| bathtub | 70 | 170 | | desk | 120 | 60 |
+| shower | 90 | 90 | | bed | 160 | 200 |
+| wardrobe | 120 | 60 | | sofa | 200 | 90 |
+| tv_unit | 150 | 45 | | bookshelf | 80 | 30 |
 
----
-
-### 5.3 Canvas2D (`client/src/components/Canvas2D.tsx`)
-
-**Vazifasi:** DrawingData ni Konva.js bilan vizualizatsiya qilish
+### 6.3 Canvas2D
 
 **Render tartibi:**
-1. Oq fon (room background)
-2. Grid (100 birlik, och kulrang)
-3. Quvurlar (pipes — devorlar ostida)
+1. Oq fon
+2. Grid (100 birlik)
+3. Quvurlar (pipes)
 4. Devorlar (double-line, #1a1a1a, #f5f5f5 fill)
 5. Eshiklar (arc swing)
 6. Jihozlar (CAD symbollar)
@@ -159,42 +149,20 @@ Sun'iy intellekt yordamida xona rejalarini yaratuvchi full-stack TypeScript ilov
 8. Title block + Legend
 
 **Rang kodlari:**
-- Cold water: `#3b82f6` (ko'k), 2px
-- Hot water: `#ef4444` (qizil), 2px
-- Drain: `#64748b` (kulrang), 1.5px, dashed [4,4], opacity 0.6
+- Cold: `#3b82f6` (ko'k), 2px
+- Hot: `#ef4444` (qizil), 2px
+- Drain: `#64748b` (kulrang), 1.5px, dashed, opacity 0.6
 
-**Auto-scale:** Canvas o'lchamiga qarab avtomatik moslashadi
-
-**Title block:** "Floor Plan", "Masshtab: 1:50", sana, "SNiP 2.04.01-85"
-
-**Legend:** Sovuq suv (H), Issiq suv (I), Kanalizatsiya (K)
+**Muhim fix:** `Text as KonvaText` — React DOM `Text` bilan konflikt oldini olish. `React.StrictMode` olib tashlangan (react-konva bilan konflikt).
 
 ---
 
-### 5.4 DxfExporter (`server/src/export/DxfExporter.ts`)
-
-**Layerlar:**
-- WALLS (7 = black) — double line, 0.15m offset
-- PLUMBING_COLD (4 = cyan)
-- PLUMBING_HOT (1 = red)
-- PLUMBING_DRAIN (8 = gray, DASHED)
-- FIXTURES (7 = black) — CAD symbollar
-- DIMENSIONS (7 = black)
-
-**Jihozlar DXF da:**
-- Toilet: circle (bowl) + rect (tank)
-- Sink: outer rect + inner rect + drain circle
-- Bathtub: outer + inner rect
-- Shower: rect + center circle
-
----
-
-## 6. API ENDPOINTLAR
+## 7. API ENDPOINTLAR
 
 | Method | URL | Tavsif |
 |--------|-----|--------|
 | GET | `/api/health` | Server holati |
-| POST | `/api/generate` | Chizma yaratish |
+| POST | `/api/generate` | Chizma yaratish (Groq/Gemini/demo) |
 | POST | `/api/export/dxf` | DXF yuklab olish |
 | POST | `/api/export/pdf` | PDF yuklab olish |
 | POST | `/api/projects` | Loyihani saqlash |
@@ -203,32 +171,16 @@ Sun'iy intellekt yordamida xona rejalarini yaratuvchi full-stack TypeScript ilov
 
 ---
 
-## 7. SHARED TYPES
-
-```typescript
-// Asosiy tiplar
-RoomSpec       // Xona spesifikatsiyasi (o'lcham, jihozlar, eshiklar)
-DrawingData    // Chizma ma'lumotlari (devorlar, quvurlar, o'lchovlar)
-FloorPlan      // Ko'p xonali reja
-RoomLayout     // Xona pozitsiyasi bilan
-Wall           // Devor (start, end, thickness, side)
-PlacedFixture  // Joylashtirilgan jihoz (position, wall)
-Pipe           // Quvur (type, path, color)
-DimensionLine  // O'lchov chizig'i
-```
-
----
-
 ## 8. TEST HOLATI
 
 ```
 Test Files: 4 passed
-Tests:      33 passed
+Tests:      39 passed (was 33)
 
-server/src/engine/__tests__/engine.test.ts    (11 test)
-server/src/ai/__tests__/GeminiParser.test.ts  (12 test)
-server/src/export/__tests__/DxfExporter.test.ts (5 test)
-server/src/export/__tests__/PdfExporter.test.ts (5 test)
+engine.test.ts        (11 test) — FloorPlanEngine
+GeminiParser.test.ts  (18 test) — Groq/Gemini/local parser
+DxfExporter.test.ts   ( 5 test) — DXF export
+PdfExporter.test.ts   ( 5 test) — PDF export
 ```
 
 ---
@@ -240,7 +192,8 @@ server/src/export/__tests__/PdfExporter.test.ts (5 test)
 PORT=5000
 SUPABASE_URL=...
 SUPABASE_SERVICE_KEY=...
-GEMINI_API_KEY=...   ← Bu yerda muammo bor (pastga qarang)
+GEMINI_API_KEY=...    ← fallback (429 muammosi bor)
+GROQ_API_KEY=gsk_...  ← PRIMARY (ishlayapti ✅)
 ```
 
 ### client/.env
@@ -251,58 +204,27 @@ VITE_SUPABASE_ANON_KEY=...
 
 ---
 
-## 10. HOZIRGI MUAMMO — GEMINI API KEY
+## 10. HOZIRGI HOLAT
 
-**Holat:** Gemini API ishlamayapti
-
-**Xato:** `RESOURCE_EXHAUSTED — limit: 0`
-
-**Sabab:** Barcha sinab ko'rilgan API keylar bir xil Google Cloud projectga tegishli. Bu project uchun free tier limiti `0` ga tushgan (kunlik limit tugagan yoki project quota o'chirilgan).
-
-**Sinab ko'rilgan keylar:**
-- `AIzaSyB0...` — 429 (limit: 0)
-- `AIzaSyBj...` — 429 (limit: 0)
-- `AIzaSyDt...` — 429 (limit: 0)
-- `AIzaSyC9...` — 400 (expired)
-- `AIzaSyAz...` — 429 (limit: 0)
-- `AIzaSyCh...` — 400 (expired)
-
-**Yechim:**
-1. [aistudio.google.com/apikey](https://aistudio.google.com/apikey) ga kiring
-2. **"Create API key in new project"** bosing (yangi project!)
-3. Yangi keyni `server/.env` ga qo'ying
-
-**Hozirgi holat:** Demo mode ishlayapti — dimensions, room type, fixtures to'g'ri aniqlanmoqda. Gemini API ulanganda `[MODE] LIVE` logi ko'rinadi.
+| Komponent | Holat |
+|-----------|-------|
+| Groq AI (primary) | ✅ LIVE — `[MODE] LIVE via Groq` |
+| Gemini AI (fallback) | ⚠️ 429 rate limit |
+| Smart local parser | ✅ Ishlayapti |
+| Canvas2D rendering | ✅ Tuzatildi (KonvaText, StrictMode) |
+| DXF export | ✅ |
+| PDF export | ✅ |
+| Supabase auth | ✅ |
+| Project history | ✅ |
+| Multi-room floor plan | ✅ |
+| GitHub | ✅ github.com/sadullayevf766-hash/Multibuilder-AI |
 
 ---
 
-## 11. DEPLOYMENT
-
-**Railway:**
-```bash
-# render.yaml va railway.json mavjud
-# Environment variables qo'shish kerak
-```
-
-**Render:**
-```yaml
-# render.yaml tayyor
-buildCommand: npm install && npm run build --workspace=server
-startCommand: npm run start --workspace=server
-```
-
-**Supabase DB:**
-```sql
--- projects jadvali kerak
--- DEPLOYMENT.md da to'liq SQL bor
-```
-
----
-
-## 12. ISHGA TUSHIRISH
+## 11. ISHGA TUSHIRISH
 
 ```bash
-# Dependencies o'rnatish
+# Dependencies
 npm install
 cd client && npm install
 cd server && npm install
@@ -311,33 +233,33 @@ cd server && npm install
 cd server && npm run dev   # Port 5000
 cd client && npm run dev   # Port 3000
 
-# Testlar
-cd server && npm test
+# Tests
+cd server && npm test      # 39/39
 ```
+
+---
+
+## 12. DEPLOYMENT
+
+**Railway / Render:** `render.yaml` va `railway.json` tayyor.
+
+**Supabase DB:** `DEPLOYMENT.md` da to'liq SQL bor.
 
 ---
 
 ## 13. BAJARILGAN MILESTONELAR
 
-| Milestone | Holat | Tavsif |
-|-----------|-------|--------|
-| 1 | ✅ | Loyiha strukturasi, shared types, routing |
-| 2 | ✅ | FloorPlanEngine, koordinata tizimi |
-| 3 | ✅ | GeminiParser, AI integration |
-| 4 | ✅ | Canvas2D, DXF/PDF export |
-| 5 | ✅ | Loading states, error messages, project history |
+| # | Holat | Tavsif |
+|---|-------|--------|
+| M1 | ✅ | Loyiha strukturasi, shared types, routing |
+| M2 | ✅ | FloorPlanEngine, koordinata tizimi |
+| M3 | ✅ | GeminiParser, AI integration |
+| M4 | ✅ | Canvas2D, DXF/PDF export |
+| M5 | ✅ | Loading states, error messages, project history |
 | + | ✅ | Landing, Login, Signup sahifalari |
-| + | ✅ | Professional SVG symbollar (ISO 128/GOST) |
-| + | ✅ | Universal engine (13 fixture type, 6 room type) |
-| + | ✅ | Multi-room floor plan (FloorPlan type) |
-| + | ✅ | Gemini retry + cache |
+| + | ✅ | ISO 128/GOST SVG symbollar |
+| + | ✅ | Universal engine (13 fixture, 6 room type) |
+| + | ✅ | Multi-room floor plan |
+| + | ✅ | Groq primary + Gemini fallback + smart local |
 | + | ✅ | DXF quality (double walls, CAD symbols) |
-
----
-
-## 14. QOLGAN ISHLAR
-
-1. **Gemini API key** — yangi project dan key olish
-2. **Supabase DB** — `projects` jadvalini yaratish (DEPLOYMENT.md da SQL bor)
-3. **Deploy** — Railway yoki Render ga deploy qilish
-4. **Canvas2D room labels** — multi-room rejada xona nomlari ko'rsatish (isFloorPlan flag bor, lekin hali ishlatilmagan)
+| + | ✅ | Canvas2D bug fixes (KonvaText, StrictMode) |

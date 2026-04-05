@@ -1,20 +1,52 @@
 import type { RoomSpec, FixtureSpec, DoorSpec, WindowSpec, FloorPlan, RoomLayout } from '../../../shared/types';
+import { ARCHITECT_SYSTEM_PROMPT } from './prompts/architect.prompt';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface ParsedRoom {
-  roomType?: string;
+interface ArchitectFixture {
+  type: string;
+  nameUz?: string;
+  wall: 'north' | 'south' | 'east' | 'west';
+  placement?: { offsetFromCorner?: number; distanceFromWall?: number };
   dimensions?: { width: number; length: number };
-  fixtures?: Array<{
-    type: string;
-    wall: 'north' | 'south' | 'east' | 'west';
-    offset?: number;
-    count?: number;
-  }>;
-  doors?: Array<{ wall: 'north' | 'south' | 'east' | 'west'; position?: 'center' | number }>;
-  windows?: Array<{ wall: 'north' | 'south' | 'east' | 'west'; count: number }>;
+  functionalGroup?: string;
+  priority?: 'essential' | 'recommended' | 'optional';
+  clearanceNeeded?: number;
+  count?: number;
+}
+
+interface ArchitectDoor {
+  wall: 'north' | 'south' | 'east' | 'west';
+  offsetFromCorner?: number;
+  width?: number;
+  opensInward?: boolean;
+  openDirection?: 'left' | 'right';
+}
+
+interface ArchitectWindow {
+  wall: 'north' | 'south' | 'east' | 'west';
+  offsetFromCorner?: number;
+  width?: number;
+  count?: number;
+}
+
+interface ArchitectResponse {
+  roomType?: string;
+  roomName?: string;
+  dimensions?: { width: number; length: number };
+  analysis?: {
+    totalArea?: number;
+    functionalZones?: Array<{ name: string; description: string; wallSide: string }>;
+    trafficFlow?: string;
+    specialRequirements?: string[];
+  };
+  fixtures?: ArchitectFixture[];
+  doors?: ArchitectDoor[];
+  windows?: ArchitectWindow[];
+  designNotes?: string[];
+  // Multi-room support
   isMultiRoom?: boolean;
   totalArea?: number;
   rooms?: Array<{
@@ -22,61 +54,9 @@ interface ParsedRoom {
     name: string;
     width: number;
     length: number;
-    fixtures: Array<{ type: string; wall: string }>;
+    fixtures: Array<{ type: string; wall: string; placement?: { offsetFromCorner?: number } }>;
   }>;
-  notes?: string;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// SYSTEM PROMPT
-// ─────────────────────────────────────────────────────────────────────────────
-
-const SYSTEM_PROMPT = `You are an expert architectural floor plan parser. Convert natural language room descriptions into precise JSON specifications.
-
-CRITICAL RULES:
-1. Output ONLY valid JSON — no markdown, no backticks, no explanations
-2. NEVER include coordinates (x, y, x1, y1, x2, y2)
-3. NEVER include pipe paths or routing
-4. Extract EVERY detail the user mentions — count, size, position
-5. If user says "2 ta sink" add 2 sink fixtures
-6. If user says "shimoliy tomonda deraza" add window on north wall
-7. "katta" modifier increases dimensions by 1-2m
-
-OUTPUT STRUCTURE for single room:
-{
-  "roomType": "bathroom"|"kitchen"|"office"|"bedroom"|"living"|"hallway",
-  "dimensions": { "width": number_meters, "length": number_meters },
-  "fixtures": [
-    { "type": "toilet"|"sink"|"bathtub"|"shower"|"stove"|"fridge"|"dishwasher"|"desk"|"bed"|"wardrobe"|"sofa"|"tv_unit"|"bookshelf", "wall": "north"|"south"|"east"|"west", "count": 1 }
-  ],
-  "doors": [{ "wall": "south", "position": "center" }],
-  "windows": [{ "wall": "north", "count": 1 }]
-}
-
-OUTPUT STRUCTURE for multi-room (kvartira, apartment, xonali):
-{
-  "isMultiRoom": true,
-  "totalArea": number,
-  "rooms": [
-    { "type": "bathroom", "name": "Hammom", "width": 2.5, "length": 3, "fixtures": [{"type":"toilet","wall":"south"},{"type":"sink","wall":"north"}] },
-    { "type": "kitchen",  "name": "Oshxona", "width": 4, "length": 4, "fixtures": [{"type":"stove","wall":"north"},{"type":"sink","wall":"north"},{"type":"fridge","wall":"west"}] }
-  ]
-}
-
-DIMENSION RULES:
-- Extract EXACT numbers: "8x5" → width:8, length:5
-- "6 metr kenglik 4 uzunlik" → width:6, length:4
-- "katta" adds 1-2m. "kichik" subtracts 1m.
-- Defaults: bathroom 2.5×3, kitchen 4×4, bedroom 4×4, living 5×5
-
-FIXTURE DEFAULTS by room:
-- bathroom: toilet(south) + sink(north)
-- kitchen: stove(north) + sink(north) + fridge(west)
-- bedroom: bed(west) + wardrobe(east)
-- living: sofa(south) + tv_unit(north)
-- office: desk(north) + bookshelf(east)
-
-Always extract every fixture and window the user explicitly mentions.`;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PARSER CLASS
@@ -104,7 +84,7 @@ export class GeminiParser {
     if (this.groqKey) {
       try {
         const parsed = await this.callGroq(description);
-        const result = this.convertParsedToSpec(parsed, description);
+        const result = this.convertArchitectJSON(parsed, description);
         console.log('[MODE] LIVE via Groq');
         this.cache.set(cacheKey, result);
         return result;
@@ -117,7 +97,7 @@ export class GeminiParser {
     if (this.geminiKey) {
       try {
         const parsed = await this.callGeminiWithRetry(description);
-        const result = this.convertParsedToSpec(parsed, description);
+        const result = this.convertArchitectJSON(parsed, description);
         console.log('[MODE] LIVE via Gemini');
         this.cache.set(cacheKey, result);
         return result;
@@ -126,7 +106,7 @@ export class GeminiParser {
       }
     }
 
-    // 3. Smart local parser (no AI)
+    // 3. Smart local architect (no AI)
     console.log('[MODE] DEMO — local smart parser');
     const result = this.smartLocalParse(description);
     this.cache.set(cacheKey, result);
@@ -135,7 +115,7 @@ export class GeminiParser {
 
   // ── GROQ API ──────────────────────────────────────────────────────────────
 
-  private async callGroq(description: string): Promise<ParsedRoom> {
+  private async callGroq(description: string): Promise<ArchitectResponse> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 20000);
 
@@ -149,9 +129,9 @@ export class GeminiParser {
         body: JSON.stringify({
           model: 'llama-3.3-70b-versatile',
           temperature: 0.1,
-          max_tokens: 1500,
+          max_tokens: 2000,
           messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'system', content: ARCHITECT_SYSTEM_PROMPT },
             { role: 'user',   content: description }
           ]
         }),
@@ -177,7 +157,7 @@ export class GeminiParser {
 
   // ── GEMINI API ────────────────────────────────────────────────────────────
 
-  private async callGeminiWithRetry(description: string, retries = 3): Promise<ParsedRoom> {
+  private async callGeminiWithRetry(description: string, retries = 3): Promise<ArchitectResponse> {
     for (let i = 0; i < retries; i++) {
       try {
         return await this.callGemini(description);
@@ -195,7 +175,7 @@ export class GeminiParser {
     throw new Error('Gemini max retries exceeded');
   }
 
-  private async callGemini(description: string): Promise<ParsedRoom> {
+  private async callGemini(description: string): Promise<ArchitectResponse> {
     const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${this.geminiKey}`;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 30000);
@@ -206,7 +186,7 @@ export class GeminiParser {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           contents: [{
-            parts: [{ text: `${SYSTEM_PROMPT}\n\nUser: ${description}` }]
+            parts: [{ text: `${ARCHITECT_SYSTEM_PROMPT}\n\nUser: ${description}` }]
           }]
         }),
         signal: controller.signal
@@ -230,24 +210,23 @@ export class GeminiParser {
 
   // ── JSON EXTRACTION ───────────────────────────────────────────────────────
 
-  private extractJSON(text: string): ParsedRoom {
+  private extractJSON(text: string): ArchitectResponse {
     const clean = text.replace(/```json|```/gi, '').trim();
     const match = clean.match(/\{[\s\S]*\}/);
     if (!match) throw new Error('No JSON in AI response');
     return JSON.parse(match[0]);
   }
 
-  // ── CONVERT AI OUTPUT → RoomSpec | FloorPlan ─────────────────────────────
+  // ── CONVERT ARCHITECT JSON → RoomSpec | FloorPlan ────────────────────────
 
-  private convertParsedToSpec(parsed: ParsedRoom, description: string): RoomSpec | FloorPlan {
-    if (parsed.isMultiRoom && parsed.rooms) {
-      return this.buildFloorPlan(parsed);
+  private convertArchitectJSON(data: ArchitectResponse, description: string): RoomSpec | FloorPlan {
+    if (data.isMultiRoom && data.rooms) {
+      return this.buildFloorPlan(data);
     }
-    return this.buildRoomSpec(parsed, description);
+    return this.buildRoomSpec(data, description);
   }
 
-  private buildRoomSpec(p: ParsedRoom, description: string): RoomSpec {
-    // Fallback: parse dimensions from description if AI missed
+  private buildRoomSpec(p: ArchitectResponse, description: string): RoomSpec {
     let width = p.dimensions?.width || 0;
     let length = p.dimensions?.length || 0;
 
@@ -271,25 +250,29 @@ export class GeminiParser {
           id: `fixture-${fIdx++}`,
           type: f.type as any,
           wall: f.wall || this.defaultWall(f.type),
+          offsetFromCorner: f.placement?.offsetFromCorner,
+          clearanceNeeded: f.clearanceNeeded,
+          priority: f.priority,
           needsWater: ['sink', 'bathtub', 'shower'].includes(f.type),
           needsDrain: ['sink', 'toilet', 'bathtub', 'shower'].includes(f.type)
         });
       }
     }
 
-    const doors: DoorSpec[] = (p.doors?.length ? p.doors : [{ wall: 'south' }]).map((d, i) => ({
+    const doors: DoorSpec[] = (p.doors?.length ? p.doors : [{ wall: 'south' as const }]).map((d, i) => ({
       id: `door-${i}`,
       wall: d.wall,
-      width: 0.9
+      width: d.width || 0.9
     }));
 
-    const windows: WindowSpec[] = (p.windows || []).flatMap((w, i) =>
-      Array.from({ length: w.count || 1 }, (_, j) => ({
+    const windows: WindowSpec[] = (p.windows || []).flatMap((w, i) => {
+      const count = w.count || 1;
+      return Array.from({ length: count }, (_, j) => ({
         id: `window-${i}-${j}`,
         wall: w.wall,
-        width: 1.2
-      }))
-    );
+        width: w.width || 1.2
+      }));
+    });
 
     const result: RoomSpec = {
       id: `room-${Date.now()}`,
@@ -301,16 +284,20 @@ export class GeminiParser {
       windows
     };
 
+    if (p.designNotes?.length) {
+      console.log('[ARCHITECT NOTES]', p.designNotes.join(' | '));
+    }
     console.log('[PARSER OUTPUT]', JSON.stringify(result, null, 2));
     return result;
   }
 
-  private buildFloorPlan(p: ParsedRoom): FloorPlan {
+  private buildFloorPlan(p: ArchitectResponse): FloorPlan {
     const rooms: RoomLayout[] = (p.rooms || []).map((r, i) => {
       const fixtures: FixtureSpec[] = (r.fixtures || []).map((f, j) => ({
         id: `f-${i}-${j}`,
         type: f.type as any,
         wall: (f.wall as any) || this.defaultWall(f.type),
+        offsetFromCorner: f.placement?.offsetFromCorner,
         needsWater: ['sink', 'bathtub', 'shower'].includes(f.type),
         needsDrain: ['sink', 'toilet', 'bathtub', 'shower'].includes(f.type)
       }));
@@ -356,7 +343,7 @@ export class GeminiParser {
     return map[type] || 'north';
   }
 
-  // ── SMART LOCAL PARSER ────────────────────────────────────────────────────
+  // ── SMART LOCAL ARCHITECT ─────────────────────────────────────────────────
 
   private smartLocalParse(description: string): RoomSpec | FloorPlan {
     const desc = description.toLowerCase();
@@ -422,11 +409,12 @@ export class GeminiParser {
     const fixtures: FixtureSpec[] = [];
     let idx = 0;
 
-    const add = (type: string, wall: 'north' | 'south' | 'east' | 'west') => {
+    const add = (type: string, wall: 'north' | 'south' | 'east' | 'west', offset?: number) => {
       fixtures.push({
         id: `fixture-${idx++}`,
         type: type as any,
         wall,
+        offsetFromCorner: offset,
         needsWater: ['sink', 'bathtub', 'shower'].includes(type),
         needsDrain: ['sink', 'toilet', 'bathtub', 'shower'].includes(type)
       });
@@ -460,36 +448,37 @@ export class GeminiParser {
     }
     if (/vanna[^xona]|bathtub/.test(desc)) add('bathtub', getWall('bathtub'));
     if (/dush|shower/.test(desc)) add('shower', getWall('shower'));
-    if (/plita|stove|gazplita/.test(desc)) add('stove', getWall('stove'));
-    if (/muzlatgich|fridge|holodilnik/.test(desc)) add('fridge', 'west');
+    if (/plita|stove|gazplita/.test(desc)) add('stove', getWall('stove'), 0.5);
+    if (/muzlatgich|fridge|holodilnik/.test(desc)) add('fridge', 'west', 0.1);
     if (/idish yuv|dishwasher/.test(desc)) add('dishwasher', 'north');
     if (/\bstol\b|desk|ish stoli/.test(desc)) {
       const n = getCount('stol|desk');
-      for (let i = 0; i < n; i++) add('desk', 'north');
+      for (let i = 0; i < n; i++) add('desk', 'north', i * 1.5);
     }
     if (/karavot|krovat|\bbed\b/.test(desc)) {
       const n = getCount('karavot|bed');
       for (let i = 0; i < n; i++) add('bed', i === 0 ? 'west' : 'east');
     }
-    if (/shkaf|wardrobe|garderob/.test(desc)) add('wardrobe', 'east');
-    if (/divan|sofa/.test(desc)) add('sofa', 'south');
-    if (/televizor|\btv\b|tele/.test(desc)) add('tv_unit', 'north');
-    if (/kitob javon|bookshelf|\bshelf\b/.test(desc)) add('bookshelf', 'east');
+    if (/shkaf|wardrobe|garderob/.test(desc)) add('wardrobe', 'east', 0.1);
+    if (/divan|sofa/.test(desc)) add('sofa', 'south', 0.5);
+    if (/televizor|\btv\b|tele/.test(desc)) add('tv_unit', 'north', 0.5);
+    if (/kitob javon|bookshelf|\bshelf\b/.test(desc)) add('bookshelf', 'east', 0.1);
 
     return fixtures.length > 0 ? fixtures : this.defaultFixtures(roomType);
   }
 
   private defaultFixtures(roomType: string): FixtureSpec[] {
-    const defs: Record<string, Array<{type: string; wall: 'north'|'south'|'east'|'west'}>> = {
-      bathroom: [{type:'sink',wall:'north'},{type:'toilet',wall:'south'}],
-      kitchen:  [{type:'stove',wall:'north'},{type:'sink',wall:'north'},{type:'fridge',wall:'west'}],
-      bedroom:  [{type:'bed',wall:'west'},{type:'wardrobe',wall:'east'}],
-      living:   [{type:'sofa',wall:'south'},{type:'tv_unit',wall:'north'}],
-      office:   [{type:'desk',wall:'north'},{type:'bookshelf',wall:'east'}],
+    const defs: Record<string, Array<{type: string; wall: 'north'|'south'|'east'|'west'; offset?: number}>> = {
+      bathroom: [{type:'sink',wall:'north',offset:0.3},{type:'toilet',wall:'south',offset:0.3}],
+      kitchen:  [{type:'stove',wall:'north',offset:0.5},{type:'sink',wall:'north',offset:1.5},{type:'fridge',wall:'west',offset:0.1}],
+      bedroom:  [{type:'bed',wall:'west',offset:0.3},{type:'wardrobe',wall:'east',offset:0.1}],
+      living:   [{type:'sofa',wall:'south',offset:0.5},{type:'tv_unit',wall:'north',offset:0.5}],
+      office:   [{type:'desk',wall:'north',offset:0.3},{type:'bookshelf',wall:'east',offset:0.1}],
       hallway:  []
     };
     return (defs[roomType] || defs.bathroom).map((f, i) => ({
       id: `fixture-${i}`, type: f.type as any, wall: f.wall,
+      offsetFromCorner: f.offset,
       needsWater: ['sink','bathtub','shower'].includes(f.type),
       needsDrain: ['sink','toilet','bathtub','shower'].includes(f.type)
     }));

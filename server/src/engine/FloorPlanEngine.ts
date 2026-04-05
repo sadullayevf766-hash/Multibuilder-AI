@@ -204,8 +204,15 @@ export class FloorPlanEngine {
     const roomWidth = roomSpec.width;
     const roomLength = roomSpec.length;
 
+    // Wall cursor tracker — sequential placement
+    const wallCursors: Record<string, number> = {
+      north: WALL_THICKNESS + 8,
+      south: WALL_THICKNESS + 8,
+      east:  WALL_THICKNESS + 8,
+      west:  WALL_THICKNESS + 8
+    };
+
     for (const fixture of roomSpec.fixtures) {
-      // FIX 4: Default wall assignment if not specified
       if (!fixture.wall) {
         if (fixture.type === 'toilet') fixture.wall = 'south';
         else if (fixture.type === 'sink') fixture.wall = 'north';
@@ -215,14 +222,6 @@ export class FloorPlanEngine {
       const wall = walls.find(w => w.side === fixture.wall);
       if (!wall) continue;
 
-      let position = this.snapToWall(wall, FIXTURE_GAP);
-
-      // FIX 4: Sink offset 0.5m from west corner on north wall
-      if (fixture.type === 'sink' && fixture.wall === 'north') {
-        position.x = 50; // 0.5m from west corner
-      }
-
-      // FIX 3: Strict boundary check with fixture size awareness
       const fixtureDimsLocal: Record<string, { w: number; h: number }> = {
         sink: { w: 60, h: 50 }, toilet: { w: 40, h: 70 }, bathtub: { w: 70, h: 170 },
         shower: { w: 90, h: 90 }, stove: { w: 60, h: 60 }, fridge: { w: 60, h: 65 },
@@ -231,14 +230,27 @@ export class FloorPlanEngine {
         bookshelf: { w: 80, h: 30 }
       };
       const dims = fixtureDimsLocal[fixture.type] || { w: 50, h: 50 };
+
+      let position: Point;
+
+      // AI offsetFromCorner → absolut koordinata
+      if (fixture.offsetFromCorner !== undefined) {
+        position = this.placeAtOffset(wall, fixture.offsetFromCorner, dims);
+      } else if (fixture.type === 'sink' && fixture.wall === 'north') {
+        // Default sink: 0.5m from west corner
+        position = this.placeAtOffset(wall, 0.5, dims);
+      } else {
+        // Sequential cursor placement
+        position = this.placeSequential(wall, wallCursors, dims);
+      }
+
+      // Boundary clamp
       const WALL_T = WALL_THICKNESS;
       const GAP = 8;
       const minX = WALL_T + GAP;
       const minY = WALL_T + GAP;
       let maxX = (roomWidth * UNITS_PER_METER) - dims.w - WALL_T - GAP;
       let maxY = (roomLength * UNITS_PER_METER) - dims.h - WALL_T - GAP;
-
-      // Scale down fixture if room too small
       if (maxX < minX) maxX = minX;
       if (maxY < minY) maxY = minY;
 
@@ -254,6 +266,44 @@ export class FloorPlanEngine {
     }
 
     return placed;
+  }
+
+  private placeAtOffset(wall: Wall, offsetMeters: number, dims: { w: number; h: number }): Point {
+    const offsetUnits = offsetMeters * UNITS_PER_METER;
+
+    if (wall.side === 'north') {
+      return { x: wall.start.x + offsetUnits, y: wall.start.y + WALL_THICKNESS };
+    }
+    if (wall.side === 'south') {
+      return { x: wall.end.x + offsetUnits, y: wall.start.y - WALL_THICKNESS - dims.h };
+    }
+    if (wall.side === 'west') {
+      return { x: wall.start.x + WALL_THICKNESS, y: wall.end.y + offsetUnits };
+    }
+    // east
+    return { x: wall.start.x - WALL_THICKNESS - dims.w, y: wall.start.y + offsetUnits };
+  }
+
+  private placeSequential(wall: Wall, cursors: Record<string, number>, dims: { w: number; h: number }): Point {
+    const cursor = cursors[wall.side] || (WALL_THICKNESS + 8);
+
+    let position: Point;
+
+    if (wall.side === 'north') {
+      position = { x: wall.start.x + cursor, y: wall.start.y + WALL_THICKNESS };
+      cursors[wall.side] = cursor + dims.w + 10;
+    } else if (wall.side === 'south') {
+      position = { x: wall.end.x + cursor, y: wall.start.y - WALL_THICKNESS - dims.h };
+      cursors[wall.side] = cursor + dims.w + 10;
+    } else if (wall.side === 'west') {
+      position = { x: wall.start.x + WALL_THICKNESS, y: wall.end.y + cursor };
+      cursors[wall.side] = cursor + dims.h + 10;
+    } else {
+      position = { x: wall.start.x - WALL_THICKNESS - dims.w, y: wall.start.y + cursor };
+      cursors[wall.side] = cursor + dims.h + 10;
+    }
+
+    return position;
   }
 
   snapToWall(wall: Wall, gap: number): Point {

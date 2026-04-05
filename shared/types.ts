@@ -23,8 +23,12 @@ export interface FixtureSpec {
   id: string;
   type: FixtureType;
   wall?: WallSide;
+  offsetFromCorner?: number;  // meters from wall's left corner
   needsWater?: boolean;
   needsDrain?: boolean;
+  clearanceNeeded?: number;   // meters of clear space in front
+  priority?: 'essential' | 'recommended' | 'optional';
+  count?: number;
 }
 
 export interface DoorSpec {
