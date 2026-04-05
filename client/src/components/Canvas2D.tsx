@@ -42,7 +42,7 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
 
   // Auto-scale to fit canvas
   const contentWidth  = totalWidth  + CANVAS_PADDING * 2;
-  const contentHeight = totalHeight + CANVAS_PADDING * 2 + 100; // extra for title+legend
+  const contentHeight = totalHeight + CANVAS_PADDING * 2 + 120; // extra for title+legend
   const scaleX = width  / contentWidth;
   const scaleY = height / contentHeight;
   const autoScale = Math.min(scaleX, scaleY, 1) * scale;
@@ -453,7 +453,7 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
 
   const renderTitleBlock = () => {
     const blockX = totalWidth + CANVAS_PADDING - 220;
-    const blockY = totalHeight + CANVAS_PADDING + 20;
+    const blockY = totalHeight + CANVAS_PADDING + 25;
     const date = new Date().toLocaleDateString('uz-UZ');
 
     return (
@@ -469,7 +469,7 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
 
   const renderLegend = () => {
     const lx = CANVAS_PADDING;
-    const ly = totalHeight + CANVAS_PADDING + 20;
+    const ly = totalHeight + CANVAS_PADDING + 25;
 
     return (
       <Group>

@@ -272,15 +272,18 @@ export class FloorPlanEngine {
     const offsetUnits = offsetMeters * UNITS_PER_METER;
 
     if (wall.side === 'north') {
+      // North wall: start.x=0, end.x=roomWidth → offset from west corner
       return { x: wall.start.x + offsetUnits, y: wall.start.y + WALL_THICKNESS };
     }
     if (wall.side === 'south') {
+      // South wall: start.x=roomWidth, end.x=0 → offset from west corner (end.x side)
       return { x: wall.end.x + offsetUnits, y: wall.start.y - WALL_THICKNESS - dims.h };
     }
     if (wall.side === 'west') {
+      // West wall: start.y=roomLength, end.y=0 → offset from north corner (end.y side)
       return { x: wall.start.x + WALL_THICKNESS, y: wall.end.y + offsetUnits };
     }
-    // east
+    // East wall: start.y=0, end.y=roomLength → offset from north corner
     return { x: wall.start.x - WALL_THICKNESS - dims.w, y: wall.start.y + offsetUnits };
   }
 
@@ -293,12 +296,15 @@ export class FloorPlanEngine {
       position = { x: wall.start.x + cursor, y: wall.start.y + WALL_THICKNESS };
       cursors[wall.side] = cursor + dims.w + 10;
     } else if (wall.side === 'south') {
+      // South wall offset from west (end.x) corner
       position = { x: wall.end.x + cursor, y: wall.start.y - WALL_THICKNESS - dims.h };
       cursors[wall.side] = cursor + dims.w + 10;
     } else if (wall.side === 'west') {
+      // West wall offset from north (end.y) corner
       position = { x: wall.start.x + WALL_THICKNESS, y: wall.end.y + cursor };
       cursors[wall.side] = cursor + dims.h + 10;
     } else {
+      // East wall offset from north (start.y) corner
       position = { x: wall.start.x - WALL_THICKNESS - dims.w, y: wall.start.y + cursor };
       cursors[wall.side] = cursor + dims.h + 10;
     }
