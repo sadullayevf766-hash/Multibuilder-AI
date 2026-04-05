@@ -368,7 +368,7 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
       openingPoints = [dx, P, dx + doorWidth, P + WALL_T];
       arcX = dx;
       arcY = P + WALL_T;
-      arcRotation = 0;  // arc swings right and down (into room)
+      arcRotation = 90;   // Konva: 90° = arc goes RIGHT and DOWN (into room)
     } else if (wall.side === 'south') {
       const dx = midX - halfDoor;
       openingPoints = [dx, roomH - WALL_T, dx + doorWidth, roomH];
