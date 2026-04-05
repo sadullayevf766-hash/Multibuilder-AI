@@ -281,6 +281,21 @@ export class FloorPlanEngine {
       position.x = Math.max(minX, Math.min(position.x, Math.max(minX, maxX)));
       position.y = Math.max(minY, Math.min(position.y, Math.max(minY, maxY)));
 
+      // Overlap check — if position conflicts with already placed fixture, shift
+      let attempts = 0;
+      while (attempts < 5 && placed.some(p => {
+        const dx = Math.abs(p.position.x - position.x);
+        const dy = Math.abs(p.position.y - position.y);
+        return dx < dims.w && dy < dims.h;
+      })) {
+        if (fixture.wall === 'north' || fixture.wall === 'south') {
+          position.x = Math.min(position.x + dims.w + 10, maxX);
+        } else {
+          position.y = Math.min(position.y + dims.h + 10, maxY);
+        }
+        attempts++;
+      }
+
       placed.push({
         id: fixture.id,
         type: fixture.type,
