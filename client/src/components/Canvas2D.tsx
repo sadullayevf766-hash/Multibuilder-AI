@@ -218,7 +218,11 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
         return (
           <Group key={fixture.id}>
             <Rect x={x} y={y} width={60} height={60} fill="#f5f5f5" stroke="#1a1a1a" strokeWidth={1.5} />
-            <Circle x={x+30} y={y+30} radius={20} stroke="#1a1a1a" strokeWidth={1} />
+            {/* Dishwasher: horizontal lines (racks) */}
+            <Line points={[x+8, y+15, x+52, y+15]} stroke="#1a1a1a" strokeWidth={1} />
+            <Line points={[x+8, y+30, x+52, y+30]} stroke="#1a1a1a" strokeWidth={1} />
+            <Line points={[x+8, y+45, x+52, y+45]} stroke="#1a1a1a" strokeWidth={1} />
+            <Circle x={x+30} y={y+8} radius={3} fill="#1a1a1a" />
           </Group>
         );
 
@@ -422,7 +426,7 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
           x={arcX}
           y={arcY}
           innerRadius={0}
-          outerRadius={wall.side === 'east' ? doorWidth * 0.85 : doorWidth}
+          outerRadius={wall.side === 'east' ? doorWidth * 0.85 : doorWidth * 0.85}
           angle={90}
           rotation={arcRotation}
           stroke="#1a1a1a"
