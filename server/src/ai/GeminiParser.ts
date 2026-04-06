@@ -481,7 +481,7 @@ export class GeminiParser {
       bedroom:  [{type:'bed',wall:'west',offset:0.3},{type:'wardrobe',wall:'east',offset:0.1}],
       living:   [{type:'sofa',wall:'south',offset:0.5},{type:'tv_unit',wall:'north',offset:0.5},{type:'coffee_table',wall:'south',offset:1.2}],
       office:   [{type:'desk',wall:'north',offset:0.3},{type:'bookshelf',wall:'east',offset:0.1}],
-      hallway:  []
+      hallway:  [{type:'wardrobe',wall:'north',offset:0.1},{type:'coat_rack',wall:'south',offset:0.3}]
     };
     return (defs[roomType] || defs.bathroom).map((f, i) => ({
       id: `fixture-${i}`, type: f.type as any, wall: f.wall,
