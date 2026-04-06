@@ -230,14 +230,24 @@ export class GeminiParser {
 
     // Override roomType if description says combined living+kitchen
     const desc = description.toLowerCase();
-    if (/mehmonxona.*oshxona|oshxona.*mehmonxona|birlashgan|studio/.test(desc)) {
+    if (/mehmonxona.*oshxona|oshxona.*mehmonxona|birlashgan|studio|open.?plan/.test(desc)) {
       data.roomType = 'living';
+      // Add kitchen fixtures if not present
+      const hasKitchen = (data.fixtures || []).some(f => ['stove','fridge','sink'].includes(f.type));
+      if (!hasKitchen) {
+        data.fixtures = [
+          { type: 'stove', wall: 'north', placement: { offsetFromCorner: 0.5 } },
+          { type: 'sink',  wall: 'north', placement: { offsetFromCorner: 1.5 } },
+          { type: 'fridge', wall: 'west', placement: { offsetFromCorner: 0.1 } },
+          ...(data.fixtures || [])
+        ];
+      }
       // Add living fixtures if not present
-      const hasLiving = (data.fixtures || []).some(f => ['sofa','tv_unit','armchair'].includes(f.type));
+      const hasLiving = (data.fixtures || []).some(f => ['sofa','tv_unit'].includes(f.type));
       if (!hasLiving) {
         data.fixtures = [
           ...(data.fixtures || []),
-          { type: 'sofa', wall: 'south', placement: { offsetFromCorner: 0.5 } },
+          { type: 'sofa',    wall: 'south', placement: { offsetFromCorner: 0.5 } },
           { type: 'tv_unit', wall: 'north', placement: { offsetFromCorner: 2.5 } }
         ];
       }
