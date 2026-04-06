@@ -479,7 +479,7 @@ export class GeminiParser {
       bathroom: [{type:'sink',wall:'north',offset:0.3},{type:'toilet',wall:'south',offset:0.3}],
       kitchen:  [{type:'stove',wall:'north',offset:0.5},{type:'sink',wall:'north',offset:1.5},{type:'fridge',wall:'west',offset:0.1}],
       bedroom:  [{type:'bed',wall:'west',offset:0.3},{type:'wardrobe',wall:'east',offset:0.1}],
-      living:   [{type:'sofa',wall:'south',offset:0.5},{type:'tv_unit',wall:'north',offset:0.5}],
+      living:   [{type:'sofa',wall:'south',offset:0.5},{type:'tv_unit',wall:'north',offset:0.5},{type:'coffee_table',wall:'south',offset:1.2}],
       office:   [{type:'desk',wall:'north',offset:0.3},{type:'bookshelf',wall:'east',offset:0.1}],
       hallway:  []
     };
@@ -534,7 +534,9 @@ export class GeminiParser {
   private detectRoomType(desc: string): string {
     if (/hammom|vanna\s*xona|bathroom|dush|wc/.test(desc)) return 'bathroom';
     if (/oshxona|kitchen|plita|stove/.test(desc))           return 'kitchen';
+    if (/bolalar\s*xona|children|nursery|o'yin\s*xona/.test(desc)) return 'bedroom';
     if (/yotoqxona|bedroom|karavot/.test(desc))             return 'bedroom';
+    if (/mehmonxona.*oshxona|oshxona.*mehmonxona|studio|birlashgan/.test(desc)) return 'living';
     if (/mehmonxona|living|zal|divan/.test(desc))           return 'living';
     if (/ofis|office|kabinet/.test(desc))                   return 'office';
     if (/koridor|hallway|daliz/.test(desc))                 return 'hallway';

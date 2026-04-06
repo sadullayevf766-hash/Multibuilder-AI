@@ -73,6 +73,20 @@ STEP 3 — APPLY professional knowledge:
   • Wardrobe/coat rack near entrance
   • Keep clear of furniture if narrow
 
+  CHILDREN'S ROOM (Bolalar xonasi/Yotoqxona):
+  • Treat as bedroom with study area
+  • Single bed (90x200) + desk + wardrobe
+  • If > 12m²: add bookshelf, toy storage
+  • Bed: against longest wall, away from door
+  • Desk: near window for natural light
+  • Wardrobe: near entrance
+
+  COMBINED LIVING+KITCHEN (Mehmonxona va oshxona birlashgan / Studio):
+  • Kitchen zone: north wall (stove+sink+fridge)
+  • Living zone: south area (sofa+tv_unit+coffee_table)
+  • Dining zone: center (dining_table if > 20m²)
+  • Clear separation between zones
+
 STEP 4 — CALCULATE proportional placement:
   • Use offsetFromCorner in METERS from the LEFT corner of each wall
   • Place fixtures with proper spacing between them
