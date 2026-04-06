@@ -296,6 +296,10 @@ export class FloorPlanEngine {
         attempts++;
       }
 
+      // Re-clamp after overlap resolution
+      position.x = Math.max(minX, Math.min(position.x, Math.max(minX, maxX)));
+      position.y = Math.max(minY, Math.min(position.y, Math.max(minY, maxY)));
+
       placed.push({
         id: fixture.id,
         type: fixture.type,
