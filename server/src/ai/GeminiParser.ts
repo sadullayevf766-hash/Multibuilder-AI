@@ -422,8 +422,8 @@ export class GeminiParser {
       if (isCombined) { width = 6; length = 5; } // combined needs more space
     }
 
-    if (isLarge) { width += 1.5; length += 1.5; }
-    if (isSmall && width > 2) { width -= 0.5; length -= 0.5; }
+    if (isLarge && !dims.width) { width += 1.5; length += 1.5; }
+    if (isSmall && !dims.width && width > 2) { width -= 0.5; length -= 0.5; }
 
     let fixtures = this.extractFixtures(desc, roomType);
 
@@ -547,7 +547,7 @@ export class GeminiParser {
       kitchen:  [{type:'stove',wall:'north',offset:0.5},{type:'sink',wall:'north',offset:1.5},{type:'fridge',wall:'west',offset:0.1}],
       bedroom:  [{type:'bed',wall:'west',offset:0.3},{type:'wardrobe',wall:'east',offset:0.1}],
       living:   [{type:'sofa',wall:'south',offset:0.5},{type:'tv_unit',wall:'north',offset:0.5},{type:'coffee_table',wall:'south',offset:1.2}],
-      office:   [{type:'desk',wall:'north',offset:0.3},{type:'bookshelf',wall:'east',offset:0.1}],
+      office:   [{type:'desk',wall:'north',offset:0.3},{type:'bookshelf',wall:'east',offset:0.1},{type:'desk',wall:'north',offset:1.8},{type:'armchair',wall:'west',offset:0.5}],
       hallway:  [{type:'wardrobe',wall:'north',offset:0.1},{type:'coat_rack',wall:'south',offset:0.3}]
     };
     return (defs[roomType] || defs.bathroom).map((f, i) => ({
