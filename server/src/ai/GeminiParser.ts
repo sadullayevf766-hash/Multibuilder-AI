@@ -227,6 +227,22 @@ export class GeminiParser {
     if (data.isMultiRoom && data.rooms) {
       return this.buildFloorPlan(data);
     }
+
+    // Override roomType if description says combined living+kitchen
+    const desc = description.toLowerCase();
+    if (/mehmonxona.*oshxona|oshxona.*mehmonxona|birlashgan|studio/.test(desc)) {
+      data.roomType = 'living';
+      // Add living fixtures if not present
+      const hasLiving = (data.fixtures || []).some(f => ['sofa','tv_unit','armchair'].includes(f.type));
+      if (!hasLiving) {
+        data.fixtures = [
+          ...(data.fixtures || []),
+          { type: 'sofa', wall: 'south', placement: { offsetFromCorner: 0.5 } },
+          { type: 'tv_unit', wall: 'north', placement: { offsetFromCorner: 2.5 } }
+        ];
+      }
+    }
+
     return this.buildRoomSpec(data, description);
   }
 
@@ -247,18 +263,36 @@ export class GeminiParser {
     const fixtures: FixtureSpec[] = [];
     let fIdx = 0;
 
+    // Normalize unknown fixture types to known ones
+    const FIXTURE_TYPE_MAP: Record<string, string> = {
+      toy: 'bookshelf', toy_box: 'bookshelf', toy_shelf: 'bookshelf',
+      play_mat: 'bookshelf', toys: 'bookshelf', playmat: 'bookshelf',
+      robot: 'bookshelf', game: 'bookshelf', game_console: 'bookshelf',
+      coat_rack: 'coat_rack', mirror: 'bookshelf', plant: 'bookshelf',
+      nightstand: 'bookshelf', side_table: 'coffee_table',
+      ottoman: 'armchair', recliner: 'armchair',
+      cabinet: 'wardrobe', closet: 'wardrobe',
+      counter: 'desk', workbench: 'desk',
+      range: 'stove', oven: 'stove', cooktop: 'stove',
+      refrigerator: 'fridge', freezer: 'fridge',
+      washer: 'dishwasher', dryer: 'dishwasher',
+      tub: 'bathtub', wc: 'toilet', commode: 'toilet',
+      basin: 'sink', washbasin: 'sink', vanity: 'sink'
+    };
+
     for (const f of (p.fixtures || [])) {
+      const normalizedType = FIXTURE_TYPE_MAP[f.type?.toLowerCase()] || f.type;
       const cnt = f.count || 1;
       for (let c = 0; c < cnt; c++) {
         fixtures.push({
           id: `fixture-${fIdx++}`,
-          type: f.type as any,
-          wall: f.wall || this.defaultWall(f.type),
+          type: normalizedType as any,
+          wall: f.wall || this.defaultWall(normalizedType),
           offsetFromCorner: f.placement?.offsetFromCorner,
           clearanceNeeded: f.clearanceNeeded,
           priority: f.priority,
-          needsWater: ['sink', 'bathtub', 'shower'].includes(f.type),
-          needsDrain: ['sink', 'toilet', 'bathtub', 'shower'].includes(f.type)
+          needsWater: ['sink', 'bathtub', 'shower'].includes(normalizedType),
+          needsDrain: ['sink', 'toilet', 'bathtub', 'shower'].includes(normalizedType)
         });
       }
     }
