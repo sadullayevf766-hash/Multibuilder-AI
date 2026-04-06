@@ -406,6 +406,7 @@ export class GeminiParser {
   private localSingleRoom(description: string, desc: string): RoomSpec {
     const dims = this.parseDimensions(description);
     const roomType = this.detectRoomType(desc);
+    const isCombined = /mehmonxona.*oshxona|oshxona.*mehmonxona|birlashgan|studio/.test(desc);
 
     const isLarge = /katta|keng|spacious|large/.test(desc);
     const isSmall = /kichik|tor|small|compact/.test(desc);
@@ -418,12 +419,34 @@ export class GeminiParser {
         living: [5, 5], office: [4, 5], hallway: [2, 3]
       };
       [width, length] = defaults[roomType] || [3, 4];
+      if (isCombined) { width = 6; length = 5; } // combined needs more space
     }
 
     if (isLarge) { width += 1.5; length += 1.5; }
     if (isSmall && width > 2) { width -= 0.5; length -= 0.5; }
 
-    const fixtures = this.extractFixtures(desc, roomType);
+    let fixtures = this.extractFixtures(desc, roomType);
+
+    // Combined living+kitchen: add both sets of fixtures
+    if (isCombined) {
+      const hasKitchen = fixtures.some(f => ['stove','fridge','sink'].includes(f.type));
+      const hasLiving = fixtures.some(f => ['sofa','tv_unit'].includes(f.type));
+      let idx = fixtures.length;
+      if (!hasKitchen) {
+        fixtures.push(
+          { id: `fixture-${idx++}`, type: 'stove' as any, wall: 'north', offsetFromCorner: 0.5, needsWater: false, needsDrain: false },
+          { id: `fixture-${idx++}`, type: 'sink' as any, wall: 'north', offsetFromCorner: 1.5, needsWater: true, needsDrain: true },
+          { id: `fixture-${idx++}`, type: 'fridge' as any, wall: 'west', offsetFromCorner: 0.1, needsWater: false, needsDrain: false }
+        );
+      }
+      if (!hasLiving) {
+        fixtures.push(
+          { id: `fixture-${idx++}`, type: 'sofa' as any, wall: 'south', offsetFromCorner: 0.5, needsWater: false, needsDrain: false },
+          { id: `fixture-${idx++}`, type: 'tv_unit' as any, wall: 'north', offsetFromCorner: 2.5, needsWater: false, needsDrain: false }
+        );
+      }
+    }
+
     const doors = this.extractDoors(desc);
     const windows = this.extractWindows(desc);
 
