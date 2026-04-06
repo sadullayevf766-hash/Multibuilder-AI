@@ -341,7 +341,7 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
         return (
           <Group key={fixture.id}>
             <Rect x={x} y={y} width={50} height={50} fill="#f0f0f0" stroke="#1a1a1a" strokeWidth={1} />
-            <KonvaText x={x+5} y={y+18} text={FIXTURE_LABELS_UZ[type] || type} fontSize={9} fill="#555" />
+            <KonvaText x={x+2} y={y+18} text={FIXTURE_LABELS[type] || type.replace(/_/g,' ').slice(0,10)} fontSize={8} fill="#555" width={46} align="center" />
           </Group>
         );
     }
