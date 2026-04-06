@@ -255,7 +255,8 @@ export class FloorPlanEngine {
         dishwasher: { w: 60, h: 60 }, desk: { w: 120, h: 60 }, bed: { w: 160, h: 200 },
         wardrobe: { w: 120, h: 60 }, sofa: { w: 200, h: 90 }, tv_unit: { w: 150, h: 45 },
         bookshelf: { w: 80, h: 30 }, armchair: { w: 80, h: 80 },
-        coffee_table: { w: 90, h: 50 }, dining_table: { w: 120, h: 80 }
+        coffee_table: { w: 90, h: 50 }, dining_table: { w: 120, h: 80 },
+        chair: { w: 50, h: 50 }, coat_rack: { w: 60, h: 30 }
       };
       const dims = fixtureDimsLocal[fixture.type] || { w: 50, h: 50 };
 
@@ -427,7 +428,9 @@ export class FloorPlanEngine {
       bookshelf:  { w: 80,  h: 30  },
       armchair:   { w: 80,  h: 80  },
       coffee_table: { w: 90, h: 50 },
-      dining_table: { w: 120, h: 80 }
+      dining_table: { w: 120, h: 80 },
+      chair:      { w: 50,  h: 50  },
+      coat_rack:  { w: 60,  h: 30  }
     };
     const dims = fixtureDims[fixture.type] || { w: 50, h: 50 };
     const fixtureCenter: Point = {

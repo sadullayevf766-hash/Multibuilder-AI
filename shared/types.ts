@@ -1,7 +1,7 @@
 // Shared types for FloorPlan Generator
 
 export type WallSide = 'north' | 'south' | 'east' | 'west';
-export type FixtureType = 'door' | 'window' | 'sink' | 'toilet' | 'shower' | 'bathtub' | 'stove' | 'fridge' | 'dishwasher' | 'desk' | 'bed' | 'wardrobe' | 'sofa' | 'tv_unit' | 'bookshelf' | 'armchair' | 'coffee_table' | 'dining_table';
+export type FixtureType = 'door' | 'window' | 'sink' | 'toilet' | 'shower' | 'bathtub' | 'stove' | 'fridge' | 'dishwasher' | 'desk' | 'bed' | 'wardrobe' | 'sofa' | 'tv_unit' | 'bookshelf' | 'armchair' | 'coffee_table' | 'dining_table' | 'chair' | 'coat_rack';
 export type PipeType = 'cold' | 'hot' | 'drain';
 
 export interface Point {

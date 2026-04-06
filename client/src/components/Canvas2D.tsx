@@ -10,7 +10,8 @@ const FIXTURE_LABELS: Record<string, string> = {
   stove: 'Plita', fridge: 'Muzlatgich', dishwasher: 'Idish yuv.',
   desk: 'Stol', bed: 'Karavot', wardrobe: 'Shkaf',
   sofa: 'Divan', tv_unit: 'TV', bookshelf: 'Kitob javon',
-  armchair: 'Kreslo', coffee_table: 'Jurnal stol', dining_table: 'Ovqat stoli'
+  armchair: 'Kreslo', coffee_table: 'Jurnal stol', dining_table: 'Ovqat stoli',
+  chair: 'Stul', coat_rack: 'Kiyim ilgich'
 };
 
 const ROOM_COLORS: Record<string, string> = {
@@ -283,6 +284,26 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
             <Line points={[x+20, y, x+20, y+30]} stroke="#1a1a1a" strokeWidth={0.5} />
             <Line points={[x+40, y, x+40, y+30]} stroke="#1a1a1a" strokeWidth={0.5} />
             <Line points={[x+60, y, x+60, y+30]} stroke="#1a1a1a" strokeWidth={0.5} />
+          </Group>
+        );
+
+      case 'coat_rack':
+      case 'coat rack':
+        return (
+          <Group key={fixture.id}>
+            <Rect x={x} y={y} width={60} height={30} fill="#f5f5f5" stroke="#1a1a1a" strokeWidth={1.5} />
+            {/* Hooks */}
+            {[10, 25, 40, 55].map((dx, i) => (
+              <Line key={i} points={[x+dx, y, x+dx, y+15]} stroke="#1a1a1a" strokeWidth={1.5} />
+            ))}
+          </Group>
+        );
+
+      case 'chair':
+        return (
+          <Group key={fixture.id}>
+            <Rect x={x} y={y} width={50} height={50} fill="#e8e8e8" stroke="#1a1a1a" strokeWidth={1.5} cornerRadius={3} />
+            <Rect x={x} y={y} width={50} height={12} fill="#d0d0d0" stroke="#1a1a1a" strokeWidth={1} />
           </Group>
         );
 
