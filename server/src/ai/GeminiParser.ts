@@ -129,6 +129,21 @@ export class GeminiParser {
 
   // Parse multi-line prompt: each line = one room → FloorPlan
   private async parseMultiLineRooms(lines: string[]): Promise<FloorPlan> {
+    // Try to parse all rooms in one Groq call (more accurate)
+    if (this.groqKey) {
+      try {
+        const multiPrompt = lines.join('\n');
+        const parsed = await this.callGroq(multiPrompt);
+        if (parsed.isMultiRoom && parsed.rooms && parsed.rooms.length >= 2) {
+          console.log('[PARSER] Multi-room via Groq:', parsed.rooms.length, 'rooms');
+          return this.buildFloorPlan(parsed);
+        }
+      } catch {
+        console.log('[PARSER] Groq multi-room failed, using local per-line parser');
+      }
+    }
+
+    // Fallback: parse each line locally
     const rooms: RoomLayout[] = [];
     let currentX = 0;
     let currentY = 0;
@@ -137,21 +152,7 @@ export class GeminiParser {
 
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
-      let roomSpec: RoomSpec;
-
-      // Try AI first, fallback to local
-      if (this.groqKey) {
-        try {
-          const parsed = await this.callGroq(line);
-          roomSpec = this.buildRoomSpec(parsed, line);
-          console.log(`[MODE] LIVE via Groq — room ${i + 1}`);
-        } catch {
-          roomSpec = this.localSingleRoom(line, line.toLowerCase());
-          console.log(`[MODE] LOCAL — room ${i + 1}`);
-        }
-      } else {
-        roomSpec = this.localSingleRoom(line, line.toLowerCase());
-      }
+      const roomSpec = this.localSingleRoom(line, line.toLowerCase());
 
       // Auto-layout
       if (currentX > 0 && currentX + roomSpec.width > MAX_ROW_WIDTH) {
@@ -421,14 +422,30 @@ export class GeminiParser {
         needsDrain: ['sink', 'toilet', 'bathtub', 'shower'].includes(f.type)
       }));
 
+      // Use doors/windows from AI response if available, else defaults
+      const roomDoors: DoorSpec[] = ((r as any).doors?.length
+        ? (r as any).doors.map((d: any, di: number) => ({ id: `door-${i}-${di}`, wall: d.wall || 'south', width: d.width || 0.9 }))
+        : [{ id: `door-${i}`, wall: 'south' as const, width: 0.9 }]);
+
+      const roomWindows: WindowSpec[] = ((r as any).windows?.length
+        ? (r as any).windows.flatMap((w: any, wi: number) => {
+            const count = w.count || 1;
+            return Array.from({ length: count }, (_, c) => ({
+              id: `win-${i}-${wi}-${c}`,
+              wall: w.wall || 'north',
+              width: w.width || 1.2
+            }));
+          })
+        : (r.type !== 'hallway' ? [{ id: `win-${i}`, wall: 'north' as const, width: 1.2 }] : []));
+
       const roomSpec: RoomSpec = {
         id: `room-${i}-${Date.now()}`,
         name: r.name,
         width: r.width,
         length: r.length,
         fixtures,
-        doors: [{ id: `door-${i}`, wall: 'south', width: 0.9 }],
-        windows: [{ id: `win-${i}`, wall: 'north', width: 1.2 }]
+        doors: roomDoors,
+        windows: roomWindows
       };
 
       return {
@@ -576,14 +593,37 @@ export class GeminiParser {
     };
 
     const getWall = (type: string): 'north' | 'south' | 'east' | 'west' => {
-      // Normalize apostrophe variants: g'arb, g`arb, garb
-      const normalized = desc.replace(/g[`'']arb/g, 'garb');
-      // Try: "shimolda lavabo", "lavabo shimolda", "shimolda lavabo va plita"
+      // Normalize apostrophe variants: g'arb, g`arb → garb
+      const normalized = desc.replace(/g[`'']/g, 'g').replace(/garb/g, 'garb');
       const wallKeywords = 'shimol|janub|sharq|garb|north|south|east|west';
-      // Find sentence fragment containing this fixture type
+
+      // Uzbek keyword aliases for each fixture type
+      const aliases: Record<string, string> = {
+        sink:       'lavabo|sink|rakovine',
+        toilet:     'hojatxona|toilet|unitas|wc|unitaz',
+        bathtub:    'vanna|bathtub',
+        shower:     'dush|shower|kabina',
+        stove:      'plita|stove|gazplita',
+        fridge:     'muzlatgich|fridge|holodilnik',
+        dishwasher: 'idish|dishwasher',
+        desk:       'stol|desk',
+        bed:        'karavot|krovat|bed',
+        wardrobe:   'shkaf|wardrobe|garderob',
+        sofa:       'divan|sofa',
+        tv_unit:    'televizor|tv|tele',
+        bookshelf:  'kitob|bookshelf|shelf',
+        coat_rack:  'kiyim|coat',
+        armchair:   'kreslo|armchair',
+        coffee_table: 'jurnal|coffee',
+        dining_table: 'ovqat|dining',
+        chair:      'stul|chair'
+      };
+      const searchPattern = aliases[type] || type;
+
+      // Split by comma or newline — each fragment is one "clause"
       const sentences = normalized.split(/[,\n]/);
       for (const sentence of sentences) {
-        if (!new RegExp(type).test(sentence)) continue;
+        if (!new RegExp(searchPattern).test(sentence)) continue;
         const wm = sentence.match(new RegExp(`(${wallKeywords})`));
         if (wm) {
           const w = wm[1];
@@ -607,20 +647,20 @@ export class GeminiParser {
     if (/vanna[^xona]|bathtub/.test(desc)) add('bathtub', getWall('bathtub'));
     if (/dush|shower/.test(desc)) add('shower', getWall('shower'));
     if (/plita|stove|gazplita/.test(desc)) add('stove', getWall('stove'), 0.5);
-    if (/muzlatgich|fridge|holodilnik/.test(desc)) add('fridge', 'west', 0.1);
-    if (/idish yuv|dishwasher/.test(desc)) add('dishwasher', 'north');
+    if (/muzlatgich|fridge|holodilnik/.test(desc)) add('fridge', getWall('fridge'), 0.1);
+    if (/idish yuv|dishwasher/.test(desc)) add('dishwasher', getWall('dishwasher'));
     if (/\bstol\b|desk|ish stoli/.test(desc)) {
       const n = getCount('stol|desk');
-      for (let i = 0; i < n; i++) add('desk', 'north', i * 1.5);
+      for (let i = 0; i < n; i++) add('desk', getWall('desk'), i * 1.5);
     }
     if (/karavot|krovat|\bbed\b/.test(desc)) {
       const n = getCount('karavot|bed');
-      for (let i = 0; i < n; i++) add('bed', i === 0 ? 'west' : 'east');
+      for (let i = 0; i < n; i++) add('bed', i === 0 ? getWall('bed') : 'east');
     }
-    if (/shkaf|wardrobe|garderob/.test(desc)) add('wardrobe', 'east', 0.1);
-    if (/divan|sofa/.test(desc)) add('sofa', 'south', 0.5);
-    if (/televizor|\btv\b|tele/.test(desc)) add('tv_unit', 'north', 0.5);
-    if (/kitob javon|bookshelf|\bshelf\b/.test(desc)) add('bookshelf', 'east', 0.1);
+    if (/shkaf|wardrobe|garderob/.test(desc)) add('wardrobe', getWall('wardrobe'), 0.1);
+    if (/divan|sofa/.test(desc)) add('sofa', getWall('sofa'), 0.5);
+    if (/televizor|\btv\b|tele/.test(desc)) add('tv_unit', getWall('tv_unit'), 0.5);
+    if (/kitob javon|bookshelf|\bshelf\b/.test(desc)) add('bookshelf', getWall('bookshelf'), 0.1);
 
     return fixtures.length > 0 ? fixtures : this.defaultFixtures(roomType);
   }

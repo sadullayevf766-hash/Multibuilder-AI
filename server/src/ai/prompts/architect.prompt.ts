@@ -130,19 +130,21 @@ For SINGLE ROOM:
   "designNotes": ["key design decisions explained"]
 }
 
-For MULTI-ROOM (kvartira, apartment, N xonali):
+For MULTI-ROOM (kvartira, apartment, N xonali, OR multiple lines each describing a room):
 {
   "isMultiRoom": true,
   "totalArea": number,
   "rooms": [
     {
-      "type": "bathroom"|"kitchen"|"bedroom"|"living"|"hallway",
+      "type": "bathroom"|"kitchen"|"bedroom"|"living"|"hallway"|"office",
       "name": "Uzbek name",
       "width": number,
       "length": number,
       "fixtures": [
-        { "type": "string", "wall": "string", "placement": { "offsetFromCorner": number } }
-      ]
+        { "type": "string", "wall": "north"|"south"|"east"|"west", "placement": { "offsetFromCorner": number } }
+      ],
+      "doors": [{ "wall": "north"|"south"|"east"|"west", "width": 0.9 }],
+      "windows": [{ "wall": "north"|"south"|"east"|"west", "width": 1.2, "count": 1 }]
     }
   ]
 }
