@@ -503,14 +503,38 @@ export class GeminiParser {
       return 1;
     };
 
+    // Normalize apostrophes and special chars for matching
+    const normalizedDesc = desc.replace(/g[''\u2019\u2018]arb/g, 'garb').replace(/[''\u2019\u2018]/g, '');
+
+    // Split into clauses by comma/newline for accurate wall detection
+    const clauses = normalizedDesc.split(/[,\n]+/).map(c => c.trim());
+
     const getWall = (type: string): 'north' | 'south' | 'east' | 'west' => {
-      const wallMatch = desc.match(new RegExp(`(shimol|janub|sharq|g.arb|north|south|east|west)[^.]*${type}|${type}[^.]*?(shimol|janub|sharq|g.arb|north|south|east|west)`));
-      if (!wallMatch) return this.defaultWall(type);
-      const w = wallMatch[1] || wallMatch[2];
-      if (/shimol|north/.test(w)) return 'north';
-      if (/janub|south/.test(w))  return 'south';
-      if (/sharq|east/.test(w))   return 'east';
-      if (/g.arb|west/.test(w))   return 'west';
+      const fixtureKeywords: Record<string, string> = {
+        sink: 'lavabo|sink', toilet: 'hojatxona|toilet|unitas|wc',
+        bathtub: 'vanna', shower: 'dush|shower', stove: 'plita|stove|gazplita',
+        fridge: 'muzlatgich|fridge', dishwasher: 'idish yuv|dishwasher',
+        desk: 'stol|desk', bed: 'karavot|krovat|bed', wardrobe: 'shkaf|wardrobe|garderob',
+        sofa: 'divan|sofa', tv_unit: 'televizor|tv|tele', bookshelf: 'kitob javon|bookshelf|shelf',
+        coat_rack: 'kiyim ilgich|coat'
+      };
+      const fkw = fixtureKeywords[type] || type;
+      const fkwRe = new RegExp(fkw, 'i');
+
+      // Search only within the clause that contains this fixture keyword
+      for (const clause of clauses) {
+        if (!fkwRe.test(clause)) continue;
+        // Found the clause — now find wall keyword in it
+        const wallMatch = clause.match(/(shimol|janub|sharq|garb|north|south|east|west)/i);
+        if (wallMatch) {
+          const w = wallMatch[1].toLowerCase();
+          if (/shimol|north/.test(w)) return 'north';
+          if (/janub|south/.test(w))  return 'south';
+          if (/sharq|east/.test(w))   return 'east';
+          if (/garb|west/.test(w))    return 'west';
+        }
+      }
+
       return this.defaultWall(type);
     };
 
@@ -525,20 +549,22 @@ export class GeminiParser {
     if (/vanna[^xona]|bathtub/.test(desc)) add('bathtub', getWall('bathtub'));
     if (/dush|shower/.test(desc)) add('shower', getWall('shower'));
     if (/plita|stove|gazplita/.test(desc)) add('stove', getWall('stove'), 0.5);
-    if (/muzlatgich|fridge|holodilnik/.test(desc)) add('fridge', 'west', 0.1);
-    if (/idish yuv|dishwasher/.test(desc)) add('dishwasher', 'north');
+    if (/muzlatgich|fridge|holodilnik/.test(desc)) add('fridge', getWall('fridge'), 0.1);
+    if (/idish yuv|dishwasher/.test(desc)) add('dishwasher', getWall('dishwasher'));
     if (/\bstol\b|desk|ish stoli/.test(desc)) {
       const n = getCount('stol|desk');
-      for (let i = 0; i < n; i++) add('desk', 'north', i * 1.5);
+      const deskWall = getWall('desk');
+      for (let i = 0; i < n; i++) add('desk', deskWall, i * 1.5);
     }
     if (/karavot|krovat|\bbed\b/.test(desc)) {
       const n = getCount('karavot|bed');
-      for (let i = 0; i < n; i++) add('bed', i === 0 ? 'west' : 'east');
+      const bedWall = getWall('bed');
+      for (let i = 0; i < n; i++) add('bed', i === 0 ? bedWall : (bedWall === 'west' ? 'east' : bedWall));
     }
-    if (/shkaf|wardrobe|garderob/.test(desc)) add('wardrobe', 'east', 0.1);
-    if (/divan|sofa/.test(desc)) add('sofa', 'south', 0.5);
-    if (/televizor|\btv\b|tele/.test(desc)) add('tv_unit', 'north', 0.5);
-    if (/kitob javon|bookshelf|\bshelf\b/.test(desc)) add('bookshelf', 'east', 0.1);
+    if (/shkaf|wardrobe|garderob/.test(desc)) add('wardrobe', getWall('wardrobe'), 0.1);
+    if (/divan|sofa/.test(desc)) add('sofa', getWall('sofa'), 0.5);
+    if (/televizor|\btv\b|tele/.test(desc)) add('tv_unit', getWall('tv_unit'), 0.5);
+    if (/kitob javon|bookshelf|\bshelf\b/.test(desc)) add('bookshelf', getWall('bookshelf'), 0.1);
 
     return fixtures.length > 0 ? fixtures : this.defaultFixtures(roomType);
   }
@@ -561,16 +587,16 @@ export class GeminiParser {
   }
 
   private extractDoors(desc: string): DoorSpec[] {
+    const normalizedDesc = desc.replace(/g[''\u2019\u2018]arb/g, 'garb').replace(/[''\u2019\u2018]/g, '');
+    const clauses = normalizedDesc.split(/[,\n]+/).map(c => c.trim());
     const wallMap: Record<string, 'north'|'south'|'east'|'west'> = {
-      'shimol': 'north', 'north': 'north',
-      'janub': 'south',  'south': 'south',
-      'sharq': 'east',   'east': 'east',
-      'garb':  'west',   'west': 'west'
+      shimol: 'north', north: 'north', janub: 'south', south: 'south',
+      sharq: 'east', east: 'east', garb: 'west', west: 'west'
     };
-    for (const [key, wall] of Object.entries(wallMap)) {
-      if (new RegExp(`${key}.*eshik|eshik.*${key}`).test(desc)) {
-        return [{ id: 'door-0', wall, width: 0.9 }];
-      }
+    for (const clause of clauses) {
+      if (!/eshik|door/.test(clause)) continue;
+      const wm = clause.match(/(shimol|janub|sharq|garb|north|south|east|west)/i);
+      if (wm) return [{ id: 'door-0', wall: wallMap[wm[1].toLowerCase()] || 'south', width: 0.9 }];
     }
     return [{ id: 'door-0', wall: 'south', width: 0.9 }];
   }
@@ -578,23 +604,23 @@ export class GeminiParser {
   private extractWindows(desc: string): WindowSpec[] {
     const windows: WindowSpec[] = [];
     let idx = 0;
+    const normalizedDesc = desc.replace(/g[''\u2019\u2018]arb/g, 'garb').replace(/[''\u2019\u2018]/g, '');
+    const clauses = normalizedDesc.split(/[,\n]+/).map(c => c.trim());
     const wallMap: Record<string, 'north'|'south'|'east'|'west'> = {
-      'shimol': 'north', 'north': 'north',
-      'janub': 'south',  'south': 'south',
-      'sharq': 'east',   'east': 'east',
-      'garb':  'west',   'west': 'west'
+      shimol: 'north', north: 'north', janub: 'south', south: 'south',
+      sharq: 'east', east: 'east', garb: 'west', west: 'west'
     };
 
-    for (const [key, wall] of Object.entries(wallMap)) {
-      if (new RegExp(`${key}.*deraza|deraza.*${key}`).test(desc)) {
+    for (const clause of clauses) {
+      if (!/deraza|window/.test(clause)) continue;
+      const wm = clause.match(/(shimol|janub|sharq|garb|north|south|east|west)/i);
+      const wall = wm ? (wallMap[wm[1].toLowerCase()] || 'north') : 'north';
+      // Count: "2 ta deraza" or "shimolda 2 ta deraza"
+      const countMatch = clause.match(/(\d+)\s*ta\s+deraza/);
+      const count = countMatch ? parseInt(countMatch[1]) : 1;
+      for (let c = 0; c < count; c++) {
         windows.push({ id: `win-${idx++}`, wall, width: 1.2 });
       }
-    }
-
-    if (windows.length === 0) {
-      const m = desc.match(/(\d+)\s*ta\s+deraza/);
-      const n = m ? parseInt(m[1]) : (/deraza|window/.test(desc) ? 1 : 0);
-      for (let i = 0; i < n; i++) windows.push({ id: `win-${i}`, wall: 'north', width: 1.2 });
     }
 
     return windows;
