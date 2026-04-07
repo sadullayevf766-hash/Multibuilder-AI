@@ -262,11 +262,12 @@ export class FloorPlanEngine {
       const wall = walls.find(w => w.side === fixture.wall);
       if (!wall) continue;
 
-      // Override: toilet always south, bathtub always east or west (longest wall)
-      if (fixture.type === 'toilet' && fixture.wall === 'north') {
+      // Override: toilet ALWAYS south wall (never north/east/west)
+      if (fixture.type === 'toilet') {
         const southWall = walls.find(w => w.side === 'south');
         if (southWall) fixture.wall = 'south';
       }
+      // Override: bathtub always east or west (longest wall)
       if (fixture.type === 'bathtub' && (fixture.wall === 'north' || fixture.wall === 'south')) {
         // Bathtub on longest wall
         const eastWall = walls.find(w => w.side === 'east');

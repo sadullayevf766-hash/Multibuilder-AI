@@ -372,6 +372,16 @@ export class GeminiParser {
       width: d.width || 0.9
     }));
 
+    // Bathroom: door must be south (toilet is south, door can't be same wall as toilet)
+    // Also ensure door is not on same wall as toilet
+    const toiletWall = (p.fixtures || []).find(f => f.type === 'toilet')?.wall;
+    const finalDoors = doors.map(d => ({
+      ...d,
+      wall: (toiletWall && d.wall === toiletWall && p.roomType === 'bathroom')
+        ? ('east' as const)
+        : d.wall
+    }));
+
     const windows: WindowSpec[] = (p.windows || []).flatMap((w, i) => {
       const count = w.count || 1;
       return Array.from({ length: count }, (_, j) => ({
@@ -387,7 +397,7 @@ export class GeminiParser {
       width,
       length,
       fixtures,
-      doors,
+      doors: finalDoors,
       windows
     };
 
