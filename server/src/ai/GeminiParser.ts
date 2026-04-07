@@ -77,7 +77,7 @@ export class GeminiParser {
   }
 
   async parseDescription(description: string): Promise<RoomSpec | FloorPlan> {
-    const cacheKey = description.toLowerCase().trim();
+    const cacheKey = 'v2:' + description.toLowerCase().trim();
     const cached = this.cache.get(cacheKey);
 
     if (cached && Date.now() - cached.time < this.CACHE_TTL) {
@@ -129,21 +129,7 @@ export class GeminiParser {
 
   // Parse multi-line prompt: each line = one room → FloorPlan
   private async parseMultiLineRooms(lines: string[]): Promise<FloorPlan> {
-    // Try to parse all rooms in one Groq call (more accurate)
-    if (this.groqKey) {
-      try {
-        const multiPrompt = lines.join('\n');
-        const parsed = await this.callGroq(multiPrompt);
-        if (parsed.isMultiRoom && parsed.rooms && parsed.rooms.length >= 2) {
-          console.log('[PARSER] Multi-room via Groq:', parsed.rooms.length, 'rooms');
-          return this.buildFloorPlan(parsed);
-        }
-      } catch {
-        console.log('[PARSER] Groq multi-room failed, using local per-line parser');
-      }
-    }
-
-    // Fallback: parse each line locally
+    // Always use local parser for multi-line — more reliable wall placement
     const rooms: RoomLayout[] = [];
     let currentX = 0;
     let currentY = 0;
@@ -153,6 +139,10 @@ export class GeminiParser {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const roomSpec = this.localSingleRoom(line, line.toLowerCase());
+      console.log(`[MULTI-LINE] Room ${i + 1}:`, roomSpec.name, roomSpec.width, 'x', roomSpec.length,
+        'fixtures:', roomSpec.fixtures.map(f => `${f.type}@${f.wall}`).join(', '),
+        'doors:', roomSpec.doors.map(d => d.wall).join(','),
+        'windows:', roomSpec.windows.map(w => w.wall).join(','));
 
       // Auto-layout
       if (currentX > 0 && currentX + roomSpec.width > MAX_ROW_WIDTH) {
@@ -691,7 +681,7 @@ export class GeminiParser {
       'garb':  'west',   'west': 'west'
     };
     for (const [key, wall] of Object.entries(wallMap)) {
-      if (new RegExp(`${key}.*eshik|eshik.*${key}`).test(normalized)) {
+      if (new RegExp(`${key}[^,\\n]*eshik|eshik[^,\\n]*${key}`).test(normalized)) {
         return [{ id: 'door-0', wall, width: 0.9 }];
       }
     }
@@ -710,7 +700,7 @@ export class GeminiParser {
     };
 
     for (const [key, wall] of Object.entries(wallMap)) {
-      if (new RegExp(`${key}.*deraza|deraza.*${key}`).test(normalized)) {
+      if (new RegExp(`${key}[^,\\n]*deraza|deraza[^,\\n]*${key}`).test(normalized)) {
         if (wall !== doorWall) {
           // Check for count: "shimolda 2 ta deraza"
           const countMatch = normalized.match(new RegExp(`${key}[^,\\n]*?(\\d+)\\s*ta\\s*deraza|(\\d+)\\s*ta\\s*deraza[^,\\n]*?${key}`));
