@@ -31,7 +31,8 @@ export class FloorPlanEngine {
       fixtures,
       pipes,
       dimensions,
-      doors: roomSpec.doors
+      doors: roomSpec.doors,
+      windows: roomSpec.windows
     };
   }
 

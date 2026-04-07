@@ -364,8 +364,49 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
     );
   };
 
-  const renderDoor = (door: DoorSpec, walls: Wall[]) => {
-    const wall = walls.find(w => w.side === door.wall);
+  const renderWindow = (win: { id: string; wall: string; width?: number }, walls: Wall[]) => {
+    const wall = walls.find(w => w.side === win.wall);
+    if (!wall) return null;
+
+    const winWidth = (win.width || 1.2) * 100;
+    const P = CANVAS_PADDING;
+    const WALL_T = 15;
+
+    const midX = (wall.start.x + wall.end.x) / 2 + P;
+    const midY = (wall.start.y + wall.end.y) / 2 + P;
+    const halfW = winWidth / 2;
+
+    let x1 = 0, y1 = 0, x2 = 0, y2 = 0;
+
+    if (win.wall === 'north') {
+      x1 = midX - halfW; y1 = P; x2 = midX + halfW; y2 = P + WALL_T;
+    } else if (win.wall === 'south') {
+      const roomH = roomHeight + P;
+      x1 = midX - halfW; y1 = roomH - WALL_T; x2 = midX + halfW; y2 = roomH;
+    } else if (win.wall === 'east') {
+      const roomW = roomWidth + P;
+      x1 = roomW - WALL_T; y1 = midY - halfW; x2 = roomW; y2 = midY + halfW;
+    } else {
+      x1 = P; y1 = midY - halfW; x2 = P + WALL_T; y2 = midY + halfW;
+    }
+
+    const isHorizontal = win.wall === 'north' || win.wall === 'south';
+
+    return (
+      <Group key={win.id}>
+        {/* White opening */}
+        <Rect x={x1} y={y1} width={x2-x1} height={y2-y1} fill="white" stroke="none" />
+        {/* Triple line window symbol */}
+        <Line points={isHorizontal ? [x1, (y1+y2)/2-3, x2, (y1+y2)/2-3] : [(x1+x2)/2-3, y1, (x1+x2)/2-3, y2]} stroke="#3b82f6" strokeWidth={1} opacity={0.7} />
+        <Line points={isHorizontal ? [x1, (y1+y2)/2, x2, (y1+y2)/2] : [(x1+x2)/2, y1, (x1+x2)/2, y2]} stroke="#3b82f6" strokeWidth={1.5} opacity={0.9} />
+        <Line points={isHorizontal ? [x1, (y1+y2)/2+3, x2, (y1+y2)/2+3] : [(x1+x2)/2+3, y1, (x1+x2)/2+3, y2]} stroke="#3b82f6" strokeWidth={1} opacity={0.7} />
+        {/* Blue tint */}
+        <Rect x={x1} y={y1} width={x2-x1} height={y2-y1} fill="#3b82f6" opacity={0.1} stroke="none" />
+      </Group>
+    );
+  };
+
+  const renderDoor = (door: DoorSpec, walls: Wall[]) => {    const wall = walls.find(w => w.side === door.wall);
     if (!wall) return null;
 
     const doorWidth = (door.width || 0.9) * 100;
@@ -568,6 +609,8 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
           {drawingData.walls.map(renderWall)}
           {/* 5. Doors */}
           {drawingData.doors?.map(door => renderDoor(door, drawingData.walls))}
+          {/* 5b. Windows */}
+          {(drawingData as any).windows?.map((win: any) => renderWindow(win, drawingData.walls))}
           {/* 6. Fixtures (covers drain pipe start) */}
           {drawingData.fixtures.map(renderFixture)}
           {/* 6b. Fixture labels */}

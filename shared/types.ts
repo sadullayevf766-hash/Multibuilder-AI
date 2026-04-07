@@ -81,6 +81,7 @@ export interface DrawingData {
   pipes: Pipe[];
   dimensions: DimensionLine[];
   doors: DoorSpec[];
+  windows?: WindowSpec[];
 }
 
 export interface RoomConnection {
