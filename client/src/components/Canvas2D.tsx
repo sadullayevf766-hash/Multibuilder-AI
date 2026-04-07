@@ -356,9 +356,9 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
   };
 
   const renderWindow = (win: { id: string; wall: string; wallId?: string; width?: number }, walls: Wall[], allWindows: typeof drawingData.windows) => {
-    // Use wallId for precise wall lookup in multi-room, fallback to side
-    const wall = (win as any).wallId
-      ? walls.find(w => w.id === (win as any).wallId) || walls.find(w => w.side === win.wall)
+    const wallId = (win as any).wallId as string | undefined;
+    const wall = wallId
+      ? (walls.find(w => w.id === wallId) ?? walls.find(w => w.side === win.wall))
       : walls.find(w => w.side === win.wall);
     if (!wall) return null;
 
@@ -418,9 +418,10 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
   };
 
   const renderDoor = (door: DoorSpec, walls: Wall[]) => {
-    // Use wallId for precise wall lookup in multi-room, fallback to side
-    const wall = (door as any).wallId
-      ? walls.find(w => w.id === (door as any).wallId) || walls.find(w => w.side === door.wall)
+    // For multi-room: use wallId if available, else find by side
+    const wallId = (door as any).wallId as string | undefined;
+    const wall = wallId
+      ? (walls.find(w => w.id === wallId) ?? walls.find(w => w.side === door.wall))
       : walls.find(w => w.side === door.wall);
     if (!wall) return null;
 
