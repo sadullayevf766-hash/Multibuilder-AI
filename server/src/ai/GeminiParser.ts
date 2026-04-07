@@ -275,6 +275,8 @@ export class GeminiParser {
 
     // Normalize unknown fixture types to known ones
     const FIXTURE_TYPE_MAP: Record<string, string> = {
+      'meeting table': 'dining_table', meeting_table: 'dining_table', meeting_room: 'dining_table',
+      conference_table: 'dining_table', conference: 'dining_table',
       toy: 'bookshelf', toy_box: 'bookshelf', toy_shelf: 'bookshelf',
       play_mat: 'bookshelf', toys: 'bookshelf', playmat: 'bookshelf',
       robot: 'bookshelf', game: 'bookshelf', game_console: 'bookshelf',
