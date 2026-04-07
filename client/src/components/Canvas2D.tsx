@@ -355,10 +355,10 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
     );
   };
 
-  const renderWindow = (win: { id: string; wall: string; wallId?: string; width?: number }, walls: Wall[]) => {
+  const renderWindow = (win: { id: string; wall: string; wallId?: string; width?: number }, walls: Wall[], allWindows: typeof drawingData.windows) => {
     // Use wallId for precise wall lookup in multi-room, fallback to side
-    const wall = win.wallId
-      ? walls.find(w => w.id === win.wallId) || walls.find(w => w.side === win.wall)
+    const wall = (win as any).wallId
+      ? walls.find(w => w.id === (win as any).wallId) || walls.find(w => w.side === win.wall)
       : walls.find(w => w.side === win.wall);
     if (!wall) return null;
 
@@ -366,38 +366,52 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
     const P = CANVAS_PADDING;
     const WALL_T = 15;
 
-    // Wall midpoint (with padding offset)
+    // Wall coordinates with padding
     const wallStartX = wall.start.x + P;
     const wallStartY = wall.start.y + P;
     const wallEndX = wall.end.x + P;
     const wallEndY = wall.end.y + P;
-    const midX = (wallStartX + wallEndX) / 2;
-    const midY = (wallStartY + wallEndY) / 2;
-    const halfW = winWidth / 2;
 
+    // For multiple windows on same wall: distribute evenly
+    const sameWallWindows = (allWindows || []).filter(w => w.wall === win.wall && (!(w as any).wallId || (w as any).wallId === (win as any).wallId));
+    const winIndex = sameWallWindows.findIndex(w => w.id === win.id);
+    const winCount = sameWallWindows.length;
+
+    // Calculate center position based on index
+    const isHorizontal = win.wall === 'north' || win.wall === 'south';
+    let centerX: number, centerY: number;
+
+    if (isHorizontal) {
+      const wallLen = wallEndX - wallStartX;
+      const segment = wallLen / (winCount + 1);
+      centerX = wallStartX + segment * (winIndex + 1);
+      centerY = (wallStartY + wallEndY) / 2;
+    } else {
+      const wallLen = wallEndY - wallStartY;
+      const segment = wallLen / (winCount + 1);
+      centerX = (wallStartX + wallEndX) / 2;
+      centerY = wallStartY + segment * (winIndex + 1);
+    }
+
+    const halfW = winWidth / 2;
     let x1 = 0, y1 = 0, x2 = 0, y2 = 0;
 
     if (win.wall === 'north') {
-      x1 = midX - halfW; y1 = wallStartY; x2 = midX + halfW; y2 = wallStartY + WALL_T;
+      x1 = centerX - halfW; y1 = wallStartY; x2 = centerX + halfW; y2 = wallStartY + WALL_T;
     } else if (win.wall === 'south') {
-      x1 = midX - halfW; y1 = wallEndY - WALL_T; x2 = midX + halfW; y2 = wallEndY;
+      x1 = centerX - halfW; y1 = wallEndY - WALL_T; x2 = centerX + halfW; y2 = wallEndY;
     } else if (win.wall === 'east') {
-      x1 = wallStartX - WALL_T; y1 = midY - halfW; x2 = wallStartX; y2 = midY + halfW;
+      x1 = wallStartX - WALL_T; y1 = centerY - halfW; x2 = wallStartX; y2 = centerY + halfW;
     } else { // west
-      x1 = wallStartX; y1 = midY - halfW; x2 = wallStartX + WALL_T; y2 = midY + halfW;
+      x1 = wallStartX; y1 = centerY - halfW; x2 = wallStartX + WALL_T; y2 = centerY + halfW;
     }
-
-    const isHorizontal = win.wall === 'north' || win.wall === 'south';
 
     return (
       <Group key={win.id}>
-        {/* White opening */}
         <Rect x={x1} y={y1} width={x2-x1} height={y2-y1} fill="white" stroke="none" />
-        {/* Triple line window symbol */}
         <Line points={isHorizontal ? [x1, (y1+y2)/2-3, x2, (y1+y2)/2-3] : [(x1+x2)/2-3, y1, (x1+x2)/2-3, y2]} stroke="#3b82f6" strokeWidth={1} opacity={0.7} />
         <Line points={isHorizontal ? [x1, (y1+y2)/2, x2, (y1+y2)/2] : [(x1+x2)/2, y1, (x1+x2)/2, y2]} stroke="#3b82f6" strokeWidth={1.5} opacity={0.9} />
         <Line points={isHorizontal ? [x1, (y1+y2)/2+3, x2, (y1+y2)/2+3] : [(x1+x2)/2+3, y1, (x1+x2)/2+3, y2]} stroke="#3b82f6" strokeWidth={1} opacity={0.7} />
-        {/* Blue tint */}
         <Rect x={x1} y={y1} width={x2-x1} height={y2-y1} fill="#3b82f6" opacity={0.1} stroke="none" />
       </Group>
     );
@@ -655,7 +669,7 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
           {/* 5. Doors */}
           {drawingData.doors?.map(door => renderDoor(door, drawingData.walls))}
           {/* 5b. Windows */}
-          {(drawingData as any).windows?.map((win: any) => renderWindow(win, drawingData.walls))}
+          {(drawingData as any).windows?.map((win: any) => renderWindow(win, drawingData.walls, (drawingData as any).windows))}
           {/* 6. Fixtures (covers drain pipe start) */}
           {drawingData.fixtures.map(renderFixture)}
           {/* 6b. Fixture labels */}
