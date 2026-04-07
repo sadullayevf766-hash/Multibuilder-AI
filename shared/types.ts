@@ -34,12 +34,14 @@ export interface FixtureSpec {
 export interface DoorSpec {
   id: string;
   wall: WallSide;
+  wallId?: string;  // specific wall id for multi-room
   width?: number; // meters, default 0.9
 }
 
 export interface WindowSpec {
   id: string;
   wall: WallSide;
+  wallId?: string;  // specific wall id for multi-room
   width?: number; // meters
 }
 

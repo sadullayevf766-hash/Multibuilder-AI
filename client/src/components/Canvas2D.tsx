@@ -142,14 +142,6 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
     );
   };
 
-  const FIXTURE_LABELS_UZ: Record<string, string> = {
-    sink: 'Lavabo', toilet: 'Hojatxona', bathtub: 'Vanna',
-    shower: 'Dush', stove: 'Plita', fridge: 'Muzlatgich',
-    dishwasher: 'Idish yuv.', desk: 'Stol', bed: 'Karavot',
-    wardrobe: 'Shkaf', sofa: 'Divan', tv_unit: 'TV',
-    bookshelf: 'Kitob javon'
-  };
-
   const renderFixtureLabel = (fixture: PlacedFixture) => {
     const { type, position } = fixture;
     const label = FIXTURE_LABELS[type] || type;
@@ -288,7 +280,6 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
         );
 
       case 'coat_rack':
-      case 'coat rack':
         return (
           <Group key={fixture.id}>
             <Rect x={x} y={y} width={60} height={30} fill="#f5f5f5" stroke="#1a1a1a" strokeWidth={1.5} />
@@ -364,30 +355,36 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
     );
   };
 
-  const renderWindow = (win: { id: string; wall: string; width?: number }, walls: Wall[]) => {
-    const wall = walls.find(w => w.side === win.wall);
+  const renderWindow = (win: { id: string; wall: string; wallId?: string; width?: number }, walls: Wall[]) => {
+    // Use wallId for precise wall lookup in multi-room, fallback to side
+    const wall = win.wallId
+      ? walls.find(w => w.id === win.wallId) || walls.find(w => w.side === win.wall)
+      : walls.find(w => w.side === win.wall);
     if (!wall) return null;
 
     const winWidth = (win.width || 1.2) * 100;
     const P = CANVAS_PADDING;
     const WALL_T = 15;
 
-    const midX = (wall.start.x + wall.end.x) / 2 + P;
-    const midY = (wall.start.y + wall.end.y) / 2 + P;
+    // Wall midpoint (with padding offset)
+    const wallStartX = wall.start.x + P;
+    const wallStartY = wall.start.y + P;
+    const wallEndX = wall.end.x + P;
+    const wallEndY = wall.end.y + P;
+    const midX = (wallStartX + wallEndX) / 2;
+    const midY = (wallStartY + wallEndY) / 2;
     const halfW = winWidth / 2;
 
     let x1 = 0, y1 = 0, x2 = 0, y2 = 0;
 
     if (win.wall === 'north') {
-      x1 = midX - halfW; y1 = P; x2 = midX + halfW; y2 = P + WALL_T;
+      x1 = midX - halfW; y1 = wallStartY; x2 = midX + halfW; y2 = wallStartY + WALL_T;
     } else if (win.wall === 'south') {
-      const roomH = roomHeight + P;
-      x1 = midX - halfW; y1 = roomH - WALL_T; x2 = midX + halfW; y2 = roomH;
+      x1 = midX - halfW; y1 = wallEndY - WALL_T; x2 = midX + halfW; y2 = wallEndY;
     } else if (win.wall === 'east') {
-      const roomW = roomWidth + P;
-      x1 = roomW - WALL_T; y1 = midY - halfW; x2 = roomW; y2 = midY + halfW;
-    } else {
-      x1 = P; y1 = midY - halfW; x2 = P + WALL_T; y2 = midY + halfW;
+      x1 = wallStartX - WALL_T; y1 = midY - halfW; x2 = wallStartX; y2 = midY + halfW;
+    } else { // west
+      x1 = wallStartX; y1 = midY - halfW; x2 = wallStartX + WALL_T; y2 = midY + halfW;
     }
 
     const isHorizontal = win.wall === 'north' || win.wall === 'south';
@@ -406,20 +403,26 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
     );
   };
 
-  const renderDoor = (door: DoorSpec, walls: Wall[]) => {    const wall = walls.find(w => w.side === door.wall);
+  const renderDoor = (door: DoorSpec, walls: Wall[]) => {
+    // Use wallId for precise wall lookup in multi-room, fallback to side
+    const wall = (door as any).wallId
+      ? walls.find(w => w.id === (door as any).wallId) || walls.find(w => w.side === door.wall)
+      : walls.find(w => w.side === door.wall);
     if (!wall) return null;
 
     const doorWidth = (door.width || 0.9) * 100;
     const WALL_T = 15;
     const P = CANVAS_PADDING;
 
-    // Room bounds
-    const roomW = roomWidth + P;
-    const roomH = roomHeight + P;
+    // Wall coordinates with padding
+    const wallStartX = wall.start.x + P;
+    const wallStartY = wall.start.y + P;
+    const wallEndX = wall.end.x + P;
+    const wallEndY = wall.end.y + P;
 
     // Door center on wall midpoint
-    const midX = (wall.start.x + wall.end.x) / 2 + P;
-    const midY = (wall.start.y + wall.end.y) / 2 + P;
+    const midX = (wallStartX + wallEndX) / 2;
+    const midY = (wallStartY + wallEndY) / 2;
     const halfDoor = doorWidth / 2;
 
     let openingPoints: number[] = [];
@@ -427,29 +430,29 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
 
     if (wall.side === 'north') {
       const dx = midX - halfDoor;
-      openingPoints = [dx, P, dx + doorWidth, P + WALL_T];
+      openingPoints = [dx, wallStartY, dx + doorWidth, wallStartY + WALL_T];
       arcX = dx;
-      arcY = P + WALL_T;
-      arcRotation = 90;   // Konva: 90° = arc goes RIGHT and DOWN (into room)
+      arcY = wallStartY + WALL_T;
+      arcRotation = 90;
     } else if (wall.side === 'south') {
       const dx = midX - halfDoor;
-      openingPoints = [dx, roomH - WALL_T, dx + doorWidth, roomH];
+      openingPoints = [dx, wallEndY - WALL_T, dx + doorWidth, wallEndY];
       arcX = dx;
-      arcY = roomH - WALL_T;
-      arcRotation = 270;  // Konva: 270° = arc goes RIGHT and UP (into room from south)
+      arcY = wallEndY - WALL_T;
+      arcRotation = 270;
     } else if (wall.side === 'east') {
       const dy = midY - halfDoor;
-      openingPoints = [roomW - WALL_T, dy, roomW, dy + doorWidth];
-      arcX = roomW - WALL_T;
+      openingPoints = [wallStartX - WALL_T, dy, wallStartX, dy + doorWidth];
+      arcX = wallStartX - WALL_T;
       arcY = dy + doorWidth;
       arcRotation = 180;
     } else {
       // west
       const dy = midY - halfDoor;
-      openingPoints = [P, dy, P + WALL_T, dy + doorWidth];
-      arcX = P + WALL_T;  // inner wall surface
-      arcY = dy;           // top of door opening
-      arcRotation = 90;    // arc swings RIGHT into room
+      openingPoints = [wallStartX, dy, wallStartX + WALL_T, dy + doorWidth];
+      arcX = wallStartX + WALL_T;
+      arcY = dy;
+      arcRotation = 90;
     }
 
     return (
@@ -462,10 +465,6 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
           height={openingPoints[3] - openingPoints[1]}
           fill="white"
           stroke="none"
-          clipX={wall.side === 'east' ? roomW - WALL_T : undefined}
-          clipY={wall.side === 'east' ? openingPoints[1] : undefined}
-          clipWidth={wall.side === 'east' ? WALL_T + 2 : undefined}
-          clipHeight={wall.side === 'east' ? doorWidth : undefined}
         />
         {/* Door leaf */}
         <Line
@@ -474,29 +473,21 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
               ? [arcX, arcY, arcX + doorWidth, arcY]
               : wall.side === 'east'
                 ? [arcX, arcY, arcX, arcY - doorWidth]
-                : [arcX, arcY, arcX, arcY + doorWidth]  // west: door leaf goes DOWN
+                : [arcX, arcY, arcX, arcY + doorWidth]
           }
           stroke="#1a1a1a"
           strokeWidth={1.5}
-          clipX={wall.side === 'east' ? roomW - WALL_T - 1 : undefined}
-          clipY={wall.side === 'east' ? arcY - doorWidth - 1 : undefined}
-          clipWidth={wall.side === 'east' ? WALL_T + 2 : undefined}
-          clipHeight={wall.side === 'east' ? doorWidth + 2 : undefined}
         />
         {/* Swing arc */}
         <Arc
           x={arcX}
           y={arcY}
           innerRadius={0}
-          outerRadius={wall.side === 'east' ? doorWidth * 0.85 : doorWidth * 0.85}
+          outerRadius={doorWidth * 0.85}
           angle={90}
           rotation={arcRotation}
           stroke="#1a1a1a"
           strokeWidth={1}
-          clipX={wall.side === 'east' ? roomWidth + CANVAS_PADDING - WALL_T - doorWidth : undefined}
-          clipY={wall.side === 'east' ? arcY - doorWidth : undefined}
-          clipWidth={wall.side === 'east' ? doorWidth + WALL_T : undefined}
-          clipHeight={wall.side === 'east' ? doorWidth * 2 : undefined}
         />
       </Group>
     );
@@ -510,11 +501,30 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
     
     const midX = (startX + endX) / 2;
     const midY = (startY + endY) / 2;
-    const offset = -30; // Place dimensions outside room (negative = outside)
 
+    // Room label (value === 0 means it's a room name label, not a dimension)
+    if (dim.value === 0) {
+      return (
+        <Group key={dim.id}>
+          <KonvaText
+            x={midX - 50}
+            y={midY - 8}
+            text={dim.label}
+            fontSize={10}
+            fontStyle="bold"
+            fill="#1a1a1a"
+            width={100}
+            align="center"
+          />
+        </Group>
+      );
+    }
+
+    const offset = -30;
     const dx = endX - startX;
     const dy = endY - startY;
     const length = Math.sqrt(dx * dx + dy * dy);
+    if (length < 1) return null;
     const nx = -dy / length;
     const ny = dx / length;
 
@@ -546,6 +556,39 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
         />
       </Group>
     );
+  };
+
+  // Render colored room backgrounds for floor plans
+  const renderRoomBackgrounds = () => {
+    if (!isFloorPlan) return null;
+    // Extract room info from dimension labels (label-layout-xxx)
+    return drawingData.dimensions
+      .filter(d => d.id.startsWith('label-'))
+      .map(d => {
+        // Room center is at (start.x, start.y - 10) → center = start.x, (start.y + end.y)/2
+        const cx = d.start.x;
+        const cy = (d.start.y + d.end.y) / 2;
+        // Detect room type from label text
+        const label = d.label.toLowerCase();
+        let color = ROOM_COLORS.default;
+        if (/oshxona|kitchen/.test(label))   color = ROOM_COLORS.kitchen;
+        else if (/hammom|bathroom/.test(label)) color = ROOM_COLORS.bathroom;
+        else if (/yotoqxona|bedroom/.test(label)) color = ROOM_COLORS.bedroom;
+        else if (/zal|mehmonxona|living/.test(label)) color = ROOM_COLORS.living;
+        else if (/ofis|office/.test(label))  color = ROOM_COLORS.office;
+        else if (/koridor|hallway/.test(label)) color = ROOM_COLORS.hallway;
+        // We don't have room bounds here, so just render a subtle tint circle
+        return (
+          <Circle
+            key={d.id + '-bg'}
+            x={cx + CANVAS_PADDING}
+            y={cy + CANVAS_PADDING}
+            radius={40}
+            fill={color}
+            opacity={0.5}
+          />
+        );
+      });
   };
 
   const renderTitleBlock = () => {
@@ -597,6 +640,8 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
             fill="white"
             stroke="none"
           />
+          {/* 1b. Multi-room colored backgrounds */}
+          {renderRoomBackgrounds()}
           {/* 2. Grid */}
           {renderGrid()}
           {/* 3. ALL pipes BEFORE walls (walls cover pipe ends inside wall) */}

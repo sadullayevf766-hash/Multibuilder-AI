@@ -41,16 +41,18 @@ export class FloorPlanEngine {
     const allFixtures: PlacedFixture[] = [];
     const allPipes: Pipe[] = [];
     const allDimensions: DimensionLine[] = [];
-    const allDoors = floorPlan.rooms.flatMap(r => r.roomSpec.doors);
+    const allDoors: import('../../../shared/types').DoorSpec[] = [];
+    const allWindows: import('../../../shared/types').WindowSpec[] = [];
 
-    // FIX 1: Auto-layout — rooms share walls exactly
-    const buildingWidth = floorPlan.buildingDimensions.width;
+    // Auto-layout: smart 2-row grid layout
+    // Row 1: living + kitchen (wide rooms), Row 2: bedrooms + bathroom + hallway
+    const MAX_ROW_WIDTH = 12; // meters — wrap after this
     let currentX = 0;
     let currentY = 0;
     let rowMaxLength = 0;
 
     for (const room of floorPlan.rooms) {
-      if (currentX + room.roomSpec.width > buildingWidth + 0.1) {
+      if (currentX > 0 && currentX + room.roomSpec.width > MAX_ROW_WIDTH) {
         currentY += rowMaxLength;
         currentX = 0;
         rowMaxLength = 0;
@@ -60,6 +62,11 @@ export class FloorPlanEngine {
       rowMaxLength = Math.max(rowMaxLength, room.roomSpec.length);
       console.log(`[ENGINE] Room ${room.id} at (${room.position.x}, ${room.position.y})`);
     }
+
+    // Recalculate actual building bounds after layout
+    const actualBW = Math.max(...floorPlan.rooms.map(r => r.position.x + r.roomSpec.width));
+    const actualBL = Math.max(...floorPlan.rooms.map(r => r.position.y + r.roomSpec.length));
+    floorPlan.buildingDimensions = { width: actualBW, length: actualBL };
 
     for (const room of floorPlan.rooms) {
       const offsetX = room.position.x * UNITS_PER_METER;
@@ -96,7 +103,16 @@ export class FloorPlanEngine {
       });
 
       // Apply offset to dimensions (skip per-room dims for floor plan)
-    }
+
+      // Collect doors/windows with wallId for correct rendering
+      room.roomSpec.doors.forEach((d, di) => {
+        const wallId = `${room.id}-wall-${d.wall}-${room.roomSpec.id}`;
+        allDoors.push({ ...d, id: `${room.id}-${d.id}`, wallId });
+      });
+      (room.roomSpec.windows || []).forEach((w, wi) => {
+        const wallId = `${room.id}-wall-${w.wall}-${room.roomSpec.id}`;
+        allWindows.push({ ...w, id: `${room.id}-${w.id}`, wallId });
+      });    }
 
     // Remove duplicate shared walls between adjacent rooms
     const dedupedWalls = this.removeDuplicateWalls(allWalls);
@@ -134,7 +150,8 @@ export class FloorPlanEngine {
       fixtures: allFixtures,
       pipes: allPipes,
       dimensions: [...overallDimensions, ...roomLabels],
-      doors: allDoors
+      doors: allDoors,
+      windows: allWindows
     };
   }
 

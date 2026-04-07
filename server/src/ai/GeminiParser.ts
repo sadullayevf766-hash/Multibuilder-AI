@@ -84,6 +84,16 @@ export class GeminiParser {
       console.log('[PARSER] Cache hit');
       return cached.result;
     }
+
+    // Detect multi-line prompt (each line = separate room)
+    const lines = description.trim().split('\n').map(l => l.trim()).filter(l => l.length > 3);
+    if (lines.length >= 2) {
+      console.log('[PARSER] Multi-line prompt detected:', lines.length, 'rooms');
+      const result = await this.parseMultiLineRooms(lines);
+      this.cache.set(cacheKey, { result, time: Date.now() });
+      return result;
+    }
+
     // 1. Try Groq (free, fast — 14,400 req/day)
     if (this.groqKey) {
       try {
@@ -115,6 +125,62 @@ export class GeminiParser {
     const result = this.smartLocalParse(description);
     this.cache.set(cacheKey, { result, time: Date.now() });
     return result;
+  }
+
+  // Parse multi-line prompt: each line = one room → FloorPlan
+  private async parseMultiLineRooms(lines: string[]): Promise<FloorPlan> {
+    const rooms: RoomLayout[] = [];
+    let currentX = 0;
+    let currentY = 0;
+    let rowMaxLength = 0;
+    const MAX_ROW_WIDTH = 12;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      let roomSpec: RoomSpec;
+
+      // Try AI first, fallback to local
+      if (this.groqKey) {
+        try {
+          const parsed = await this.callGroq(line);
+          roomSpec = this.buildRoomSpec(parsed, line);
+          console.log(`[MODE] LIVE via Groq — room ${i + 1}`);
+        } catch {
+          roomSpec = this.localSingleRoom(line, line.toLowerCase());
+          console.log(`[MODE] LOCAL — room ${i + 1}`);
+        }
+      } else {
+        roomSpec = this.localSingleRoom(line, line.toLowerCase());
+      }
+
+      // Auto-layout
+      if (currentX > 0 && currentX + roomSpec.width > MAX_ROW_WIDTH) {
+        currentY += rowMaxLength;
+        currentX = 0;
+        rowMaxLength = 0;
+      }
+
+      rooms.push({
+        id: `layout-${i}`,
+        roomSpec,
+        position: { x: currentX, y: currentY },
+        connections: []
+      });
+
+      currentX += roomSpec.width;
+      rowMaxLength = Math.max(rowMaxLength, roomSpec.length);
+    }
+
+    const bW = Math.max(...rooms.map(r => r.position.x + r.roomSpec.width));
+    const bL = Math.max(...rooms.map(r => r.position.y + r.roomSpec.length));
+
+    return {
+      id: `fp-${Date.now()}`,
+      name: 'Floor Plan',
+      totalArea: bW * bL,
+      rooms,
+      buildingDimensions: { width: bW, length: bL }
+    };
   }
 
   // ── GROQ API ──────────────────────────────────────────────────────────────
@@ -373,8 +439,12 @@ export class GeminiParser {
       };
     });
 
-    const bW = Math.max(...rooms.map(r => r.position.x + r.roomSpec.width), 10);
-    const bL = Math.max(...rooms.map(r => r.position.y + r.roomSpec.length), 10);
+    // Calculate actual building bounds after layout
+    // Rooms are laid out in a row by FloorPlanEngine, so estimate here
+    const totalRoomWidth = rooms.reduce((sum, r) => sum + r.roomSpec.width, 0);
+    const maxRoomLength = Math.max(...rooms.map(r => r.roomSpec.length));
+    const bW = Math.max(totalRoomWidth, 10);
+    const bL = Math.max(maxRoomLength, 8);
 
     return {
       id: `fp-${Date.now()}`,
@@ -400,7 +470,7 @@ export class GeminiParser {
 
   private smartLocalParse(description: string): RoomSpec | FloorPlan {
     const desc = description.toLowerCase();
-    const isMultiRoom = /kvartira|apartment|xonali|ko'p xona|uy rejasi/.test(desc);
+    const isMultiRoom = /kvartira|apartment|(\d+)\s*xonali|ko.p\s*xona|uy\s*rejasi|kichik\s*uy|zamonaviy\s*uy/.test(desc);
     if (isMultiRoom) return this.localFloorPlan(description, desc);
     return this.localSingleRoom(description, desc);
   }
@@ -420,7 +490,7 @@ export class GeminiParser {
         bathroom: [2.5, 3], kitchen: [4, 4], bedroom: [4, 4],
         living: [5, 5], office: [4, 5], hallway: [2, 3]
       };
-      [width, length] = defaults[roomType] || [3, 4];
+      [width, length] = defaults[roomType] || [4, 5];
       if (isCombined) { width = 6; length = 5; } // combined needs more space
     }
 
@@ -450,7 +520,7 @@ export class GeminiParser {
     }
 
     const doors = this.extractDoors(desc);
-    const windows = this.extractWindows(desc);
+    const windows = this.extractWindows(desc, doors[0]?.wall);
 
     const result: RoomSpec = {
       id: `room-${Date.now()}`,
@@ -503,38 +573,14 @@ export class GeminiParser {
       return 1;
     };
 
-    // Normalize apostrophes and special chars for matching
-    const normalizedDesc = desc.replace(/g[''\u2019\u2018]arb/g, 'garb').replace(/[''\u2019\u2018]/g, '');
-
-    // Split into clauses by comma/newline for accurate wall detection
-    const clauses = normalizedDesc.split(/[,\n]+/).map(c => c.trim());
-
     const getWall = (type: string): 'north' | 'south' | 'east' | 'west' => {
-      const fixtureKeywords: Record<string, string> = {
-        sink: 'lavabo|sink', toilet: 'hojatxona|toilet|unitas|wc',
-        bathtub: 'vanna', shower: 'dush|shower', stove: 'plita|stove|gazplita',
-        fridge: 'muzlatgich|fridge', dishwasher: 'idish yuv|dishwasher',
-        desk: 'stol|desk', bed: 'karavot|krovat|bed', wardrobe: 'shkaf|wardrobe|garderob',
-        sofa: 'divan|sofa', tv_unit: 'televizor|tv|tele', bookshelf: 'kitob javon|bookshelf|shelf',
-        coat_rack: 'kiyim ilgich|coat'
-      };
-      const fkw = fixtureKeywords[type] || type;
-      const fkwRe = new RegExp(fkw, 'i');
-
-      // Search only within the clause that contains this fixture keyword
-      for (const clause of clauses) {
-        if (!fkwRe.test(clause)) continue;
-        // Found the clause — now find wall keyword in it
-        const wallMatch = clause.match(/(shimol|janub|sharq|garb|north|south|east|west)/i);
-        if (wallMatch) {
-          const w = wallMatch[1].toLowerCase();
-          if (/shimol|north/.test(w)) return 'north';
-          if (/janub|south/.test(w))  return 'south';
-          if (/sharq|east/.test(w))   return 'east';
-          if (/garb|west/.test(w))    return 'west';
-        }
-      }
-
+      const wallMatch = desc.match(new RegExp(`(shimol|janub|sharq|g.arb|north|south|east|west)[^.]*${type}|${type}[^.]*?(shimol|janub|sharq|g.arb|north|south|east|west)`));
+      if (!wallMatch) return this.defaultWall(type);
+      const w = wallMatch[1] || wallMatch[2];
+      if (/shimol|north/.test(w)) return 'north';
+      if (/janub|south/.test(w))  return 'south';
+      if (/sharq|east/.test(w))   return 'east';
+      if (/g.arb|west/.test(w))   return 'west';
       return this.defaultWall(type);
     };
 
@@ -549,22 +595,20 @@ export class GeminiParser {
     if (/vanna[^xona]|bathtub/.test(desc)) add('bathtub', getWall('bathtub'));
     if (/dush|shower/.test(desc)) add('shower', getWall('shower'));
     if (/plita|stove|gazplita/.test(desc)) add('stove', getWall('stove'), 0.5);
-    if (/muzlatgich|fridge|holodilnik/.test(desc)) add('fridge', getWall('fridge'), 0.1);
-    if (/idish yuv|dishwasher/.test(desc)) add('dishwasher', getWall('dishwasher'));
+    if (/muzlatgich|fridge|holodilnik/.test(desc)) add('fridge', 'west', 0.1);
+    if (/idish yuv|dishwasher/.test(desc)) add('dishwasher', 'north');
     if (/\bstol\b|desk|ish stoli/.test(desc)) {
       const n = getCount('stol|desk');
-      const deskWall = getWall('desk');
-      for (let i = 0; i < n; i++) add('desk', deskWall, i * 1.5);
+      for (let i = 0; i < n; i++) add('desk', 'north', i * 1.5);
     }
     if (/karavot|krovat|\bbed\b/.test(desc)) {
       const n = getCount('karavot|bed');
-      const bedWall = getWall('bed');
-      for (let i = 0; i < n; i++) add('bed', i === 0 ? bedWall : (bedWall === 'west' ? 'east' : bedWall));
+      for (let i = 0; i < n; i++) add('bed', i === 0 ? 'west' : 'east');
     }
-    if (/shkaf|wardrobe|garderob/.test(desc)) add('wardrobe', getWall('wardrobe'), 0.1);
-    if (/divan|sofa/.test(desc)) add('sofa', getWall('sofa'), 0.5);
-    if (/televizor|\btv\b|tele/.test(desc)) add('tv_unit', getWall('tv_unit'), 0.5);
-    if (/kitob javon|bookshelf|\bshelf\b/.test(desc)) add('bookshelf', getWall('bookshelf'), 0.1);
+    if (/shkaf|wardrobe|garderob/.test(desc)) add('wardrobe', 'east', 0.1);
+    if (/divan|sofa/.test(desc)) add('sofa', 'south', 0.5);
+    if (/televizor|\btv\b|tele/.test(desc)) add('tv_unit', 'north', 0.5);
+    if (/kitob javon|bookshelf|\bshelf\b/.test(desc)) add('bookshelf', 'east', 0.1);
 
     return fixtures.length > 0 ? fixtures : this.defaultFixtures(roomType);
   }
@@ -587,40 +631,45 @@ export class GeminiParser {
   }
 
   private extractDoors(desc: string): DoorSpec[] {
-    const normalizedDesc = desc.replace(/g[''\u2019\u2018]arb/g, 'garb').replace(/[''\u2019\u2018]/g, '');
-    const clauses = normalizedDesc.split(/[,\n]+/).map(c => c.trim());
     const wallMap: Record<string, 'north'|'south'|'east'|'west'> = {
-      shimol: 'north', north: 'north', janub: 'south', south: 'south',
-      sharq: 'east', east: 'east', garb: 'west', west: 'west'
+      'shimol': 'north', 'north': 'north',
+      'janub': 'south',  'south': 'south',
+      'sharq': 'east',   'east': 'east',
+      'garb':  'west',   'west': 'west'
     };
-    for (const clause of clauses) {
-      if (!/eshik|door/.test(clause)) continue;
-      const wm = clause.match(/(shimol|janub|sharq|garb|north|south|east|west)/i);
-      if (wm) return [{ id: 'door-0', wall: wallMap[wm[1].toLowerCase()] || 'south', width: 0.9 }];
+    for (const [key, wall] of Object.entries(wallMap)) {
+      if (new RegExp(`${key}.*eshik|eshik.*${key}`).test(desc)) {
+        return [{ id: 'door-0', wall, width: 0.9 }];
+      }
     }
     return [{ id: 'door-0', wall: 'south', width: 0.9 }];
   }
 
-  private extractWindows(desc: string): WindowSpec[] {
+  private extractWindows(desc: string, doorWall?: string): WindowSpec[] {
     const windows: WindowSpec[] = [];
     let idx = 0;
-    const normalizedDesc = desc.replace(/g[''\u2019\u2018]arb/g, 'garb').replace(/[''\u2019\u2018]/g, '');
-    const clauses = normalizedDesc.split(/[,\n]+/).map(c => c.trim());
     const wallMap: Record<string, 'north'|'south'|'east'|'west'> = {
-      shimol: 'north', north: 'north', janub: 'south', south: 'south',
-      sharq: 'east', east: 'east', garb: 'west', west: 'west'
+      'shimol': 'north', 'north': 'north',
+      'janub': 'south',  'south': 'south',
+      'sharq': 'east',   'east': 'east',
+      'garb':  'west',   'west': 'west'
     };
 
-    for (const clause of clauses) {
-      if (!/deraza|window/.test(clause)) continue;
-      const wm = clause.match(/(shimol|janub|sharq|garb|north|south|east|west)/i);
-      const wall = wm ? (wallMap[wm[1].toLowerCase()] || 'north') : 'north';
-      // Count: "2 ta deraza" or "shimolda 2 ta deraza"
-      const countMatch = clause.match(/(\d+)\s*ta\s+deraza/);
-      const count = countMatch ? parseInt(countMatch[1]) : 1;
-      for (let c = 0; c < count; c++) {
-        windows.push({ id: `win-${idx++}`, wall, width: 1.2 });
+    for (const [key, wall] of Object.entries(wallMap)) {
+      if (new RegExp(`${key}.*deraza|deraza.*${key}`).test(desc)) {
+        // Don't place window on same wall as door
+        if (wall !== doorWall) {
+          windows.push({ id: `win-${idx++}`, wall, width: 1.2 });
+        }
       }
+    }
+
+    if (windows.length === 0) {
+      const m = desc.match(/(\d+)\s*ta\s+deraza/);
+      const n = m ? parseInt(m[1]) : (/deraza|window/.test(desc) ? 1 : 0);
+      // Default window wall: north, unless door is on north
+      const defaultWall = doorWall === 'north' ? 'south' : 'north';
+      for (let i = 0; i < n; i++) windows.push({ id: `win-${i}`, wall: defaultWall as 'north'|'south'|'east'|'west', width: 1.2 });
     }
 
     return windows;
@@ -629,13 +678,15 @@ export class GeminiParser {
   private detectRoomType(desc: string): string {
     if (/hammom|vanna\s*xona|bathroom|dush|wc/.test(desc)) return 'bathroom';
     if (/oshxona|kitchen|plita|stove/.test(desc))           return 'kitchen';
-    if (/bolalar\s*xona|children|nursery|o'yin\s*xona/.test(desc)) return 'bedroom';
+    if (/bolalar\s*xona|children|nursery|o.yin\s*xona/.test(desc)) return 'bedroom';
     if (/yotoqxona|bedroom|karavot/.test(desc))             return 'bedroom';
     if (/mehmonxona.*oshxona|oshxona.*mehmonxona|studio|birlashgan/.test(desc)) return 'living';
     if (/mehmonxona|living|zal|divan/.test(desc))           return 'living';
     if (/ofis|office|kabinet/.test(desc))                   return 'office';
     if (/koridor|hallway|daliz/.test(desc))                 return 'hallway';
-    return 'bathroom';
+    // Stress test: generic prompts → default to living room
+    if (/katta\s*joy|zamonaviy|xona|room/.test(desc))       return 'living';
+    return 'living'; // default: living room (most common)
   }
 
   // ── LOCAL FLOOR PLAN ──────────────────────────────────────────────────────
@@ -644,8 +695,11 @@ export class GeminiParser {
     const areaMatch = desc.match(/(\d+)\s*kv/);
     const totalArea = areaMatch ? parseInt(areaMatch[1]) : 60;
 
-    const is4Room = /4\s*xonali|to'rt\s*xonali/.test(desc);
+    const is4Room = /4\s*xonali|to.rt\s*xonali/.test(desc);
     const is3Room = /3\s*xonali|uch\s*xonali/.test(desc);
+    const is2Room = /2\s*xonali|ikki\s*xonali/.test(desc);
+    // "kichik uy: 2 yotoqxona, oshxona, hammom" → 2 bedroom + kitchen + bathroom
+    const has2Bedrooms = /2\s*ta\s*yotoqxona|ikki\s*(ta\s*)?yotoqxona/.test(desc);
 
     const rooms: RoomLayout[] = [];
 
@@ -670,7 +724,18 @@ export class GeminiParser {
         this.makeLayout('bathroom', 'bathroom', 'Hammom',      2.5, 3,  0,   9),
         this.makeLayout('hallway',  'hallway',  'Koridor',     3,   2,  2.5, 9)
       );
+    } else if (is2Room || has2Bedrooms) {
+      // 2 xonali kvartira OR kichik uy: 2 yotoqxona, oshxona, hammom
+      rooms.push(
+        this.makeLayout('living',   'living',   'Zal',         5,   4,  0,   0),
+        this.makeLayout('kitchen',  'kitchen',  'Oshxona',     3,   4,  5,   0),
+        this.makeLayout('bed1',     'bedroom',  'Yotoqxona 1', 4,   4,  0,   4),
+        this.makeLayout('bed2',     'bedroom',  'Yotoqxona 2', 3.5, 4,  4,   4),
+        this.makeLayout('bathroom', 'bathroom', 'Hammom',      2.5, 3,  7.5, 4),
+        this.makeLayout('hallway',  'hallway',  'Koridor',     2,   2,  0,   8)
+      );
     } else {
+      // Default: 1 xonali kvartira
       rooms.push(
         this.makeLayout('living',   'living',   'Zal',       5, 4, 0, 0),
         this.makeLayout('kitchen',  'kitchen',  'Oshxona',   3, 4, 5, 0),
