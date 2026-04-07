@@ -529,7 +529,13 @@ export class GeminiParser {
     }
 
     const doors = this.extractDoors(desc);
-    const windows = this.extractWindows(desc, doors[0]?.wall);
+    let windows = this.extractWindows(desc, doors[0]?.wall);
+
+    // Add default window if none specified (except hallway/bathroom)
+    if (windows.length === 0 && !['bathroom', 'hallway'].includes(roomType)) {
+      const defaultWinWall = doors[0]?.wall === 'north' ? 'south' : 'north';
+      windows = [{ id: 'win-default', wall: defaultWinWall as 'north'|'south'|'east'|'west', width: 1.2 }];
+    }
 
     const result: RoomSpec = {
       id: `room-${Date.now()}`,
