@@ -664,7 +664,7 @@ export class GeminiParser {
   private defaultFixtures(roomType: string): FixtureSpec[] {
     const defs: Record<string, Array<{type: string; wall: 'north'|'south'|'east'|'west'; offset?: number}>> = {
       bathroom: [{type:'sink',wall:'north',offset:0.3},{type:'toilet',wall:'south',offset:0.3}],
-      kitchen:  [{type:'stove',wall:'north',offset:0.5},{type:'sink',wall:'north',offset:1.5},{type:'fridge',wall:'west',offset:0.1}],
+      kitchen:  [{type:'stove',wall:'north',offset:0.3},{type:'sink',wall:'north',offset:1.5},{type:'fridge',wall:'west',offset:0.1}],
       bedroom:  [{type:'bed',wall:'west',offset:0.3},{type:'wardrobe',wall:'east',offset:0.1}],
       living:   [{type:'sofa',wall:'south',offset:0.5},{type:'tv_unit',wall:'north',offset:0.5},{type:'coffee_table',wall:'south',offset:1.2}],
       office:   [{type:'desk',wall:'north',offset:0.3},{type:'bookshelf',wall:'east',offset:0.1},{type:'desk',wall:'north',offset:1.8},{type:'armchair',wall:'west',offset:0.5}],
