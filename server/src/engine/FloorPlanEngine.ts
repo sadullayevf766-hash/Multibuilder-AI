@@ -290,11 +290,9 @@ export class FloorPlanEngine {
       } else if (fixture.type === 'sink' && fixture.wall === 'north') {
         position = this.placeAtOffset(correctedWall, 0.5, dims);
       } else if (fixture.type === 'shower' && (fixture.wall === 'east' || fixture.wall === 'west')) {
-        // Shower: place at 1/3 from north corner on east/west wall
-        const wallLength = correctedWall.side === 'east' || correctedWall.side === 'west'
-          ? Math.abs(correctedWall.end.y - correctedWall.start.y) / UNITS_PER_METER
-          : Math.abs(correctedWall.end.x - correctedWall.start.x) / UNITS_PER_METER;
-        position = this.placeAtOffset(correctedWall, Math.max(0.3, wallLength * 0.3), dims);
+        // Shower: place at 1/3 from north corner on east/west wall, snapped to wall
+        const wallLength = Math.abs(correctedWall.end.y - correctedWall.start.y) / UNITS_PER_METER;
+        position = this.placeAtOffset(correctedWall, Math.max(0.3, wallLength * 0.25), dims);
       } else if (fixture.type === 'toilet' && fixture.wall === 'south') {
         // Toilet on south wall: place at 0.3m from west corner
         position = this.placeAtOffset(correctedWall, 0.3, dims);
