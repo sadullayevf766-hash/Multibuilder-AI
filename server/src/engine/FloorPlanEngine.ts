@@ -107,15 +107,15 @@ export class FloorPlanEngine {
 
       // Collect doors/windows with wallId for correct rendering
       room.roomSpec.doors.forEach((d) => {
-        // Find the actual wall id from generated walls
         const actualWall = roomDrawing.walls.find(w => w.side === d.wall);
         const wallId = actualWall ? `${room.id}-${actualWall.id}` : undefined;
-        allDoors.push({ ...d, id: `${room.id}-${d.id}`, wallId } as any);
+        // Also store roomOffset for fallback wall lookup
+        allDoors.push({ ...d, id: `${room.id}-${d.id}`, wallId, _roomOffsetX: offsetX, _roomOffsetY: offsetY } as any);
       });
       (room.roomSpec.windows || []).forEach((w) => {
         const actualWall = roomDrawing.walls.find(wl => wl.side === w.wall);
         const wallId = actualWall ? `${room.id}-${actualWall.id}` : undefined;
-        allWindows.push({ ...w, id: `${room.id}-${w.id}`, wallId } as any);
+        allWindows.push({ ...w, id: `${room.id}-${w.id}`, wallId, _roomOffsetX: offsetX, _roomOffsetY: offsetY } as any);
       });    }
 
     // Remove duplicate shared walls between adjacent rooms

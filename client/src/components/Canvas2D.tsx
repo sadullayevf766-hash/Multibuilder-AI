@@ -357,9 +357,20 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
 
   const renderWindow = (win: { id: string; wall: string; wallId?: string; width?: number }, walls: Wall[], allWindows: typeof drawingData.windows) => {
     const wallId = (win as any).wallId as string | undefined;
-    const wall = wallId
-      ? (walls.find(w => w.id === wallId) ?? walls.find(w => w.side === win.wall))
-      : walls.find(w => w.side === win.wall);
+    const roomOffsetX = (win as any)._roomOffsetX as number | undefined;
+    const roomOffsetY = (win as any)._roomOffsetY as number | undefined;
+
+    let wall: Wall | undefined;
+    if (wallId) {
+      wall = walls.find(w => w.id === wallId);
+    }
+    if (!wall && roomOffsetX !== undefined && roomOffsetY !== undefined) {
+      wall = walls.find(w => w.side === win.wall &&
+        Math.abs(w.start.x - roomOffsetX) < 500 &&
+        Math.abs(w.start.y - roomOffsetY) < 500
+      );
+    }
+    if (!wall) wall = walls.find(w => w.side === win.wall);
     if (!wall) return null;
 
     const winWidth = (win.width || 1.2) * 100;
@@ -418,11 +429,23 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
   };
 
   const renderDoor = (door: DoorSpec, walls: Wall[]) => {
-    // For multi-room: use wallId if available, else find by side
     const wallId = (door as any).wallId as string | undefined;
-    const wall = wallId
-      ? (walls.find(w => w.id === wallId) ?? walls.find(w => w.side === door.wall))
-      : walls.find(w => w.side === door.wall);
+    const roomOffsetX = (door as any)._roomOffsetX as number | undefined;
+    const roomOffsetY = (door as any)._roomOffsetY as number | undefined;
+
+    let wall: Wall | undefined;
+    if (wallId) {
+      wall = walls.find(w => w.id === wallId);
+    }
+    // Fallback: find wall by side + room offset
+    if (!wall && roomOffsetX !== undefined && roomOffsetY !== undefined) {
+      wall = walls.find(w => w.side === door.wall &&
+        Math.abs(w.start.x - roomOffsetX) < 500 &&
+        Math.abs(w.start.y - roomOffsetY) < 500
+      );
+    }
+    // Last resort: first wall with matching side
+    if (!wall) wall = walls.find(w => w.side === door.wall);
     if (!wall) return null;
 
     const doorWidth = (door.width || 0.9) * 100;
