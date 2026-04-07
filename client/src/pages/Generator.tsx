@@ -1,10 +1,32 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Canvas2D from '../components/Canvas2D';
 import { supabase } from '../lib/supabase';
 import type { DrawingData } from '../../../shared/types';
 
 type LoadingState = 'idle' | 'generating' | 'rendering' | 'ready' | 'error' | 'saving';
+
+// Favicon SVGs for each state
+const FAVICONS: Record<LoadingState, string> = {
+  idle:       `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%233b82f6'/><rect x='6' y='6' width='20' height='20' rx='2' fill='none' stroke='white' stroke-width='2'/><line x1='6' y1='16' x2='26' y2='16' stroke='white' stroke-width='1.5'/><line x1='16' y1='6' x2='16' y2='26' stroke='white' stroke-width='1.5'/></svg>`,
+  generating: `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23f59e0b'/><circle cx='16' cy='16' r='10' fill='none' stroke='white' stroke-width='2.5' stroke-dasharray='16 48' stroke-linecap='round'><animateTransform attributeName='transform' type='rotate' from='0 16 16' to='360 16 16' dur='0.8s' repeatCount='indefinite'/></circle></svg>`,
+  rendering:  `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%238b5cf6'/><circle cx='16' cy='16' r='10' fill='none' stroke='white' stroke-width='2.5' stroke-dasharray='24 40' stroke-linecap='round'><animateTransform attributeName='transform' type='rotate' from='0 16 16' to='360 16 16' dur='0.6s' repeatCount='indefinite'/></circle></svg>`,
+  saving:     `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2306b6d4'/><circle cx='16' cy='16' r='10' fill='none' stroke='white' stroke-width='2.5' stroke-dasharray='20 44' stroke-linecap='round'><animateTransform attributeName='transform' type='rotate' from='0 16 16' to='360 16 16' dur='0.7s' repeatCount='indefinite'/></circle></svg>`,
+  ready:      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2322c55e'/><polyline points='8,17 13,22 24,11' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/></svg>`,
+  error:      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23ef4444'/><line x1='10' y1='10' x2='22' y2='22' stroke='white' stroke-width='3' stroke-linecap='round'/><line x1='22' y1='10' x2='10' y2='22' stroke='white' stroke-width='3' stroke-linecap='round'/></svg>`,
+};
+
+function setFavicon(state: LoadingState) {
+  const svg = FAVICONS[state];
+  const url = `data:image/svg+xml,${svg}`;
+  let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+  if (!link) {
+    link = document.createElement('link');
+    link.rel = 'icon';
+    document.head.appendChild(link);
+  }
+  link.href = url;
+}
 
 export default function Generator() {
   const navigate = useNavigate();
@@ -14,6 +36,11 @@ export default function Generator() {
   const [error, setError] = useState('');
   const [projectName, setProjectName] = useState('');
   const [showSaveDialog, setShowSaveDialog] = useState(false);
+
+  // Update favicon on state change
+  useEffect(() => {
+    setFavicon(loadingState);
+  }, [loadingState]);
 
   const handleGenerate = async () => {
     if (!description.trim()) {

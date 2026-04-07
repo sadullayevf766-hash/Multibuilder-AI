@@ -476,6 +476,8 @@ export class GeminiParser {
   }
 
   private localSingleRoom(description: string, desc: string): RoomSpec {
+    // Normalize apostrophes in g'arb → garb
+    desc = desc.replace(/g[`'']/g, 'g').replace(/g'arb|garb/g, 'garb');
     const dims = this.parseDimensions(description);
     const roomType = this.detectRoomType(desc);
     const isCombined = /mehmonxona.*oshxona|oshxona.*mehmonxona|birlashgan|studio/.test(desc);
@@ -574,13 +576,23 @@ export class GeminiParser {
     };
 
     const getWall = (type: string): 'north' | 'south' | 'east' | 'west' => {
-      const wallMatch = desc.match(new RegExp(`(shimol|janub|sharq|g.arb|north|south|east|west)[^.]*${type}|${type}[^.]*?(shimol|janub|sharq|g.arb|north|south|east|west)`));
-      if (!wallMatch) return this.defaultWall(type);
-      const w = wallMatch[1] || wallMatch[2];
-      if (/shimol|north/.test(w)) return 'north';
-      if (/janub|south/.test(w))  return 'south';
-      if (/sharq|east/.test(w))   return 'east';
-      if (/g.arb|west/.test(w))   return 'west';
+      // Normalize apostrophe variants: g'arb, g`arb, garb
+      const normalized = desc.replace(/g[`'']arb/g, 'garb');
+      // Try: "shimolda lavabo", "lavabo shimolda", "shimolda lavabo va plita"
+      const wallKeywords = 'shimol|janub|sharq|garb|north|south|east|west';
+      // Find sentence fragment containing this fixture type
+      const sentences = normalized.split(/[,\n]/);
+      for (const sentence of sentences) {
+        if (!new RegExp(type).test(sentence)) continue;
+        const wm = sentence.match(new RegExp(`(${wallKeywords})`));
+        if (wm) {
+          const w = wm[1];
+          if (/shimol|north/.test(w)) return 'north';
+          if (/janub|south/.test(w))  return 'south';
+          if (/sharq|east/.test(w))   return 'east';
+          if (/garb|west/.test(w))    return 'west';
+        }
+      }
       return this.defaultWall(type);
     };
 
@@ -631,6 +643,7 @@ export class GeminiParser {
   }
 
   private extractDoors(desc: string): DoorSpec[] {
+    const normalized = desc.replace(/g[`'']/g, 'g').replace(/g'arb|g`arb|garb/g, 'garb');
     const wallMap: Record<string, 'north'|'south'|'east'|'west'> = {
       'shimol': 'north', 'north': 'north',
       'janub': 'south',  'south': 'south',
@@ -638,7 +651,7 @@ export class GeminiParser {
       'garb':  'west',   'west': 'west'
     };
     for (const [key, wall] of Object.entries(wallMap)) {
-      if (new RegExp(`${key}.*eshik|eshik.*${key}`).test(desc)) {
+      if (new RegExp(`${key}.*eshik|eshik.*${key}`).test(normalized)) {
         return [{ id: 'door-0', wall, width: 0.9 }];
       }
     }
@@ -646,6 +659,7 @@ export class GeminiParser {
   }
 
   private extractWindows(desc: string, doorWall?: string): WindowSpec[] {
+    const normalized = desc.replace(/g[`'']/g, 'g').replace(/g'arb|g`arb|garb/g, 'garb');
     const windows: WindowSpec[] = [];
     let idx = 0;
     const wallMap: Record<string, 'north'|'south'|'east'|'west'> = {
@@ -656,18 +670,21 @@ export class GeminiParser {
     };
 
     for (const [key, wall] of Object.entries(wallMap)) {
-      if (new RegExp(`${key}.*deraza|deraza.*${key}`).test(desc)) {
-        // Don't place window on same wall as door
+      if (new RegExp(`${key}.*deraza|deraza.*${key}`).test(normalized)) {
         if (wall !== doorWall) {
-          windows.push({ id: `win-${idx++}`, wall, width: 1.2 });
+          // Check for count: "shimolda 2 ta deraza"
+          const countMatch = normalized.match(new RegExp(`${key}[^,\\n]*?(\\d+)\\s*ta\\s*deraza|(\\d+)\\s*ta\\s*deraza[^,\\n]*?${key}`));
+          const count = countMatch ? parseInt(countMatch[1] || countMatch[2]) : 1;
+          for (let c = 0; c < count; c++) {
+            windows.push({ id: `win-${idx++}`, wall, width: 1.2 });
+          }
         }
       }
     }
 
     if (windows.length === 0) {
-      const m = desc.match(/(\d+)\s*ta\s+deraza/);
-      const n = m ? parseInt(m[1]) : (/deraza|window/.test(desc) ? 1 : 0);
-      // Default window wall: north, unless door is on north
+      const m = normalized.match(/(\d+)\s*ta\s+deraza/);
+      const n = m ? parseInt(m[1]) : (/deraza|window/.test(normalized) ? 1 : 0);
       const defaultWall = doorWall === 'north' ? 'south' : 'north';
       for (let i = 0; i < n; i++) windows.push({ id: `win-${i}`, wall: defaultWall as 'north'|'south'|'east'|'west', width: 1.2 });
     }
