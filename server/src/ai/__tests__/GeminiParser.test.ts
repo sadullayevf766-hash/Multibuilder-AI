@@ -192,6 +192,18 @@ describe('GeminiParser', () => {
       expect(win?.wall).toBe('north');
     });
 
+    it('should parse bathroom with unitaz on south and dush on east', async () => {
+      const p = new GeminiParser('', '');
+      const result = await p.parseDescription('3x4 hammom, shimolda lavabo, janubda unitaz, sharqda dush kabinasi') as any;
+      const toilet = result.fixtures.find((f: any) => f.type === 'toilet');
+      const shower = result.fixtures.find((f: any) => f.type === 'shower');
+      const sink = result.fixtures.find((f: any) => f.type === 'sink');
+      expect(toilet).toBeDefined();
+      expect(toilet?.wall).toBe('south');
+      expect(shower?.wall).toBe('east');
+      expect(sink?.wall).toBe('north');
+    });
+
     it('should apply katta modifier', async () => {
       const p = new GeminiParser('', '');
       const small = await p.parseDescription('oshxona') as any;

@@ -626,8 +626,8 @@ export class GeminiParser {
       return this.defaultWall(type);
     };
 
-    if (/hojatxona|toilet|unitas|wc/.test(desc)) {
-      const n = getCount('hojatxona|toilet|unitas');
+    if (/hojatxona|toilet|unitas|unitaz|wc/.test(desc)) {
+      const n = getCount('hojatxona|toilet|unitas|unitaz');
       for (let i = 0; i < n; i++) add('toilet', getWall('toilet'));
     }
     if (/lavabo|sink|rakovine/.test(desc)) {
