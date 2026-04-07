@@ -25,6 +25,7 @@ export class FloorPlanEngine {
     const pipes = this.generatePipes(fixtures, walls, roomSpec);
     const dimensions = this.generateDimensions(walls, roomSpec);
 
+    // For single room: doors/windows use wall.side directly (no wallId needed)
     return {
       id: `drawing-${roomSpec.id}`,
       walls,
@@ -105,13 +106,16 @@ export class FloorPlanEngine {
       // Apply offset to dimensions (skip per-room dims for floor plan)
 
       // Collect doors/windows with wallId for correct rendering
-      room.roomSpec.doors.forEach((d, di) => {
-        const wallId = `${room.id}-wall-${d.wall}-${room.roomSpec.id}`;
-        allDoors.push({ ...d, id: `${room.id}-${d.id}`, wallId });
+      room.roomSpec.doors.forEach((d) => {
+        // Find the actual wall id from generated walls
+        const actualWall = roomDrawing.walls.find(w => w.side === d.wall);
+        const wallId = actualWall ? `${room.id}-${actualWall.id}` : undefined;
+        allDoors.push({ ...d, id: `${room.id}-${d.id}`, wallId } as any);
       });
-      (room.roomSpec.windows || []).forEach((w, wi) => {
-        const wallId = `${room.id}-wall-${w.wall}-${room.roomSpec.id}`;
-        allWindows.push({ ...w, id: `${room.id}-${w.id}`, wallId });
+      (room.roomSpec.windows || []).forEach((w) => {
+        const actualWall = roomDrawing.walls.find(wl => wl.side === w.wall);
+        const wallId = actualWall ? `${room.id}-${actualWall.id}` : undefined;
+        allWindows.push({ ...w, id: `${room.id}-${w.id}`, wallId } as any);
       });    }
 
     // Remove duplicate shared walls between adjacent rooms

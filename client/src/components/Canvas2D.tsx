@@ -442,19 +442,22 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
     let openingPoints: number[] = [];
     let arcX = 0, arcY = 0, arcRotation = 0;
 
-    if (wall.side === 'north') {
+    // Use door.wall (from spec) not wall.side (may differ in multi-room)
+    const doorSide = door.wall;
+
+    if (doorSide === 'north') {
       const dx = midX - halfDoor;
       openingPoints = [dx, wallStartY, dx + doorWidth, wallStartY + WALL_T];
       arcX = dx;
       arcY = wallStartY + WALL_T;
       arcRotation = 90;
-    } else if (wall.side === 'south') {
+    } else if (doorSide === 'south') {
       const dx = midX - halfDoor;
       openingPoints = [dx, wallEndY - WALL_T, dx + doorWidth, wallEndY];
       arcX = dx;
       arcY = wallEndY - WALL_T;
       arcRotation = 270;
-    } else if (wall.side === 'east') {
+    } else if (doorSide === 'east') {
       const dy = midY - halfDoor;
       openingPoints = [wallStartX - WALL_T, dy, wallStartX, dy + doorWidth];
       arcX = wallStartX - WALL_T;
