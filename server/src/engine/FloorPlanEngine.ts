@@ -239,13 +239,14 @@ export class FloorPlanEngine {
         if (fixture.type === 'toilet') fixture.wall = 'south';
         else if (fixture.type === 'sink') fixture.wall = 'north';
         else if (fixture.type === 'coffee_table') {
-          // Coffee table: in front of sofa (sofa is on south wall)
+          // Coffee table: in front of sofa (sofa is on south wall), centered
           const sofaH = 90;
+          const tableW = 90;
           const tableH = 50;
-          const gap = 30;
-          const cx = (roomWidth * UNITS_PER_METER) / 2 - 45;
+          const gap = 40;
+          const cx = (roomWidth * UNITS_PER_METER) / 2 - tableW / 2;
           const cy = (roomLength * UNITS_PER_METER) - WALL_THICKNESS - sofaH - gap - tableH;
-          placed.push({ id: fixture.id, type: fixture.type, position: { x: cx, y: Math.max(WALL_THICKNESS + 10, cy) }, wall: 'south' });
+          placed.push({ id: fixture.id, type: fixture.type, position: { x: Math.max(WALL_THICKNESS + 10, cx), y: Math.max(WALL_THICKNESS + 10, cy) }, wall: 'south' });
           continue;
         } else if (fixture.type === 'dining_table') {
           // Dining table: center of room
