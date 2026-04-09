@@ -94,8 +94,12 @@ export class GeminiParser {
       return result;
     }
 
-    // 1. Try Groq (free, fast — 14,400 req/day)
-    if (this.groqKey) {
+    // For simple prompts (no detailed fixture info), use local parser directly
+    // Groq is only useful when user provides detailed fixture/wall info
+    const hasDetailedInfo = /shimol|janub|sharq|g.arb|lavabo|plita|karavot|divan|stol|shkaf|dush|unitaz|muzlatgich|sink|stove|bed|sofa|desk|toilet|shower|fridge|wardrobe/i.test(description);
+
+    // 1. Try Groq only for detailed prompts
+    if (this.groqKey && hasDetailedInfo) {
       try {
         const parsed = await this.callGroq(description);
         const result = this.convertArchitectJSON(parsed, description);
@@ -107,8 +111,8 @@ export class GeminiParser {
       }
     }
 
-    // 2. Try Gemini (with retry)
-    if (this.geminiKey) {
+    // 2. Try Gemini (with retry) for detailed prompts
+    if (this.geminiKey && hasDetailedInfo) {
       try {
         const parsed = await this.callGeminiWithRetry(description);
         const result = this.convertArchitectJSON(parsed, description);
@@ -120,7 +124,7 @@ export class GeminiParser {
       }
     }
 
-    // 3. Smart local architect (no AI)
+    // 3. Smart local architect (always used for simple prompts)
     console.log('[MODE] DEMO — local smart parser');
     const result = this.smartLocalParse(description);
     this.cache.set(cacheKey, { result, time: Date.now() });
