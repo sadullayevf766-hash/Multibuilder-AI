@@ -365,10 +365,15 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
       wall = walls.find(w => w.id === wallId);
     }
     if (!wall && roomOffsetX !== undefined && roomOffsetY !== undefined) {
-      wall = walls.find(w => w.side === win.wall &&
-        Math.abs(w.start.x - roomOffsetX) < 500 &&
-        Math.abs(w.start.y - roomOffsetY) < 500
-      );
+      wall = walls.find(w => {
+        if (w.side !== win.wall) return false;
+        const minX = Math.min(w.start.x, w.end.x);
+        const minY = Math.min(w.start.y, w.end.y);
+        const maxX = Math.max(w.start.x, w.end.x);
+        const maxY = Math.max(w.start.y, w.end.y);
+        return minX >= roomOffsetX - 10 && minY >= roomOffsetY - 10 &&
+               maxX <= roomOffsetX + 1500 && maxY <= roomOffsetY + 1500;
+      });
     }
     if (!wall) wall = walls.find(w => w.side === win.wall);
     if (!wall) return null;
@@ -438,11 +443,18 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
       wall = walls.find(w => w.id === wallId);
     }
     // Fallback: find wall by side + room offset
+    // Wall coordinates include offset, so check if wall is within room bounds
     if (!wall && roomOffsetX !== undefined && roomOffsetY !== undefined) {
-      wall = walls.find(w => w.side === door.wall &&
-        Math.abs(w.start.x - roomOffsetX) < 500 &&
-        Math.abs(w.start.y - roomOffsetY) < 500
-      );
+      wall = walls.find(w => {
+        if (w.side !== door.wall) return false;
+        // Check if this wall belongs to the room by verifying offset range
+        const minX = Math.min(w.start.x, w.end.x);
+        const minY = Math.min(w.start.y, w.end.y);
+        const maxX = Math.max(w.start.x, w.end.x);
+        const maxY = Math.max(w.start.y, w.end.y);
+        return minX >= roomOffsetX - 10 && minY >= roomOffsetY - 10 &&
+               maxX <= roomOffsetX + 1500 && maxY <= roomOffsetY + 1500;
+      });
     }
     // Last resort: first wall with matching side
     if (!wall) wall = walls.find(w => w.side === door.wall);
