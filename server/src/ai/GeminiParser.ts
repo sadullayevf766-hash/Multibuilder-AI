@@ -98,20 +98,10 @@ export class GeminiParser {
     // Groq is only useful when user provides detailed fixture/wall info
     const hasDetailedInfo = /shimol|janub|sharq|g.arb|lavabo|plita|karavot|divan|stol|shkaf|dush|unitaz|muzlatgich|sink|stove|bed|sofa|desk|toilet|shower|fridge|wardrobe/i.test(description);
 
-    // 1. Try Groq only for detailed prompts
-    if (this.groqKey && hasDetailedInfo) {
-      try {
-        const parsed = await this.callGroq(description);
-        const result = this.convertArchitectJSON(parsed, description);
-        console.log('[MODE] LIVE via Groq');
-        this.cache.set(cacheKey, { result, time: Date.now() });
-        return result;
-      } catch (err) {
-        console.log('[GROQ] Failed:', (err as Error).message, '— trying Gemini...');
-      }
-    }
+    // 1. Try Groq only for detailed prompts (disabled - local parser is more reliable)
+    // if (this.groqKey && hasDetailedInfo) { ... }
 
-    // 2. Try Gemini (with retry) for detailed prompts
+    // 2. Try Gemini for detailed prompts
     if (this.geminiKey && hasDetailedInfo) {
       try {
         const parsed = await this.callGeminiWithRetry(description);
