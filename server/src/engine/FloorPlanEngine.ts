@@ -139,12 +139,18 @@ export class FloorPlanEngine {
       const cx = (room.position.x + room.roomSpec.width / 2) * UNITS_PER_METER;
       const cy = (room.position.y + room.roomSpec.length / 2) * UNITS_PER_METER;
       const area = (room.roomSpec.width * room.roomSpec.length).toFixed(1);
+      const ROOM_NAMES_UZ: Record<string, string> = {
+        bathroom: 'Hammom', kitchen: 'Oshxona', bedroom: 'Yotoqxona',
+        living: 'Mehmonxona', office: 'Ofis', hallway: 'Koridor',
+        room: 'Xona'
+      };
+      const displayName = ROOM_NAMES_UZ[room.roomSpec.name] || room.roomSpec.name;
       return {
         id: `label-${room.id}`,
         start: { x: cx, y: cy - 10 },
         end:   { x: cx, y: cy + 10 },
         value: 0,
-        label: `${room.roomSpec.name} ${area}m²`
+        label: `${displayName} ${area}m²`
       };
     });
 
