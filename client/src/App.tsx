@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { AuthProvider, ProtectedRoute } from './lib/auth';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
@@ -14,14 +15,22 @@ function App() {
         v7_relativeSplatPath: true
       }}
     >
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/signup" element={<Signup />} />
-        <Route path="/dashboard" element={<Dashboard />} />
-        <Route path="/project/:id" element={<Project />} />
-        <Route path="/generator" element={<Generator />} />
-      </Routes>
+      <AuthProvider>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Signup />} />
+          <Route path="/dashboard" element={
+            <ProtectedRoute><Dashboard /></ProtectedRoute>
+          } />
+          <Route path="/project/:id" element={
+            <ProtectedRoute><Project /></ProtectedRoute>
+          } />
+          <Route path="/generator" element={
+            <ProtectedRoute><Generator /></ProtectedRoute>
+          } />
+        </Routes>
+      </AuthProvider>
     </BrowserRouter>
   );
 }

@@ -1,13 +1,16 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import { join } from 'path';
 import { GeminiParser } from './ai/GeminiParser';
 import { FloorPlanEngine } from './engine/FloorPlanEngine';
 import { exportToDxf } from './export/DxfExporter';
 import { PdfExporter } from './export/PdfExporter';
-import { saveProject, getProjectHistory, getProject } from './db/supabase';
+import { saveProject, getProjectHistory, getProject, renameProject, softDeleteProject, restoreProject, hardDeleteProject, getTrash } from './db/supabase';
 
-dotenv.config();
+// Try loading from server/.env first, then fallback to .env in cwd
+dotenv.config({ path: join(process.cwd(), 'server', '.env') });
+dotenv.config({ path: join(process.cwd(), '.env') });
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -87,7 +90,7 @@ app.post('/api/export/pdf', async (req, res) => {
       return res.status(400).json({ error: 'Drawing data is required' });
     }
 
-    const pdf = pdfExporter.export(drawingData);
+    const pdf = await pdfExporter.exportAsync(drawingData);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="floorplan-${drawingData.id}.pdf"`);
@@ -104,12 +107,13 @@ app.post('/api/export/pdf', async (req, res) => {
 app.post('/api/projects', async (req, res) => {
   try {
     const { userId, name, description, drawingData } = req.body;
+    const authHeader = req.headers.authorization;
 
     if (!userId || !name || !drawingData) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
 
-    const project = await saveProject(userId, name, description, drawingData);
+    const project = await saveProject(userId, name, description, drawingData, authHeader);
     res.json(project);
   } catch (error) {
     console.error('Save project error:', error);
@@ -123,7 +127,8 @@ app.post('/api/projects', async (req, res) => {
 app.get('/api/projects/:userId', async (req, res) => {
   try {
     const { userId } = req.params;
-    const projects = await getProjectHistory(userId);
+    const authHeader = req.headers.authorization;
+    const projects = await getProjectHistory(userId, authHeader);
     res.json(projects);
   } catch (error) {
     console.error('Get projects error:', error);
@@ -137,7 +142,8 @@ app.get('/api/projects/:userId', async (req, res) => {
 app.get('/api/project/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const project = await getProject(id);
+    const authHeader = req.headers.authorization;
+    const project = await getProject(id, authHeader);
     res.json(project);
   } catch (error) {
     console.error('Get project error:', error);
@@ -145,6 +151,68 @@ app.get('/api/project/:id', async (req, res) => {
       error: 'Failed to get project',
       message: error instanceof Error ? error.message : 'Unknown error'
     });
+  }
+});
+
+// Rename project
+app.patch('/api/project/:id/rename', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name } = req.body;
+    const authHeader = req.headers.authorization;
+    if (!name?.trim()) return res.status(400).json({ error: 'Name is required' });
+    const project = await renameProject(id, name.trim(), authHeader);
+    res.json(project);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to rename', message: error instanceof Error ? error.message : 'Unknown' });
+  }
+});
+
+// Soft delete → trash
+app.delete('/api/project/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const authHeader = req.headers.authorization;
+    await softDeleteProject(id, authHeader);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete', message: error instanceof Error ? error.message : 'Unknown' });
+  }
+});
+
+// Get trash
+app.get('/api/trash/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const authHeader = req.headers.authorization;
+    const items = await getTrash(userId, authHeader);
+    res.json(items);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to get trash', message: error instanceof Error ? error.message : 'Unknown' });
+  }
+});
+
+// Restore from trash
+app.patch('/api/project/:id/restore', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const authHeader = req.headers.authorization;
+    const project = await restoreProject(id, authHeader);
+    res.json(project);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to restore', message: error instanceof Error ? error.message : 'Unknown' });
+  }
+});
+
+// Hard delete (permanent)
+app.delete('/api/project/:id/permanent', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const authHeader = req.headers.authorization;
+    await hardDeleteProject(id, authHeader);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to permanently delete', message: error instanceof Error ? error.message : 'Unknown' });
   }
 });
 

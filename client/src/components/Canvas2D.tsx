@@ -1,9 +1,16 @@
+import { useRef, forwardRef, useImperativeHandle } from 'react';
 import { Stage, Layer, Line, Circle, Rect, Text as KonvaText, Group, Arrow, Arc } from 'react-konva';
+import type { Stage as KonvaStage } from 'konva/lib/Stage';
 import type { DrawingData, Wall, PlacedFixture, Pipe, DimensionLine, DoorSpec } from '../../../shared/types';
 import ToiletSymbol from './symbols/ToiletSymbol';
 import SinkSymbol from './symbols/SinkSymbol';
 import BathtubSymbol from './symbols/BathtubSymbol';
 import ShowerSymbol from './symbols/ShowerSymbol';
+import jsPDF from 'jspdf';
+
+export interface Canvas2DHandle {
+  exportToPdf: (filename?: string) => void;
+}
 
 const FIXTURE_LABELS: Record<string, string> = {
   sink: 'Lavabo', toilet: 'Hojatxona', bathtub: 'Vanna', shower: 'Dush',
@@ -26,7 +33,30 @@ interface Canvas2DProps {
   scale?: number;
 }
 
-export default function Canvas2D({ drawingData, width = 800, height = 600, scale = 1 }: Canvas2DProps) {
+const Canvas2D = forwardRef<Canvas2DHandle, Canvas2DProps>(
+function Canvas2D({ drawingData, width = 800, height = 600, scale = 1 }, ref) {
+  const stageRef = useRef<KonvaStage>(null);
+
+  useImperativeHandle(ref, () => ({
+    exportToPdf(filename = 'floorplan.pdf') {
+      const stage = stageRef.current;
+      if (!stage) return;
+
+      // High-res export: 2x pixel ratio
+      const dataUrl = stage.toDataURL({ pixelRatio: 2 });
+
+      const imgW = stage.width();
+      const imgH = stage.height();
+
+      // Choose orientation based on aspect ratio
+      const orientation = imgW >= imgH ? 'landscape' : 'portrait';
+      const pdf = new jsPDF({ orientation, unit: 'px', format: [imgW, imgH] });
+
+      pdf.addImage(dataUrl, 'PNG', 0, 0, imgW, imgH);
+      pdf.save(filename);
+    }
+  }));
+
   console.log('[CANVAS] drawing:', drawingData.dimensions?.[0]?.value, drawingData.dimensions?.[1]?.value);
 
   const GRID_SIZE = 100;
@@ -42,12 +72,13 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
   const roomWidth  = totalWidth;
   const roomHeight = totalHeight;
 
-  // Auto-scale to fit canvas
+  // Auto-scale to fit canvas width — height is derived from content aspect ratio
   const contentWidth  = totalWidth  + CANVAS_PADDING * 2;
-  const contentHeight = totalHeight + CANVAS_PADDING * 2 + 120; // extra for title+legend
-  const scaleX = width  / contentWidth;
-  const scaleY = height / contentHeight;
-  const autoScale = Math.min(scaleX, scaleY, 1) * scale;
+  const contentHeight = totalHeight + CANVAS_PADDING * 2 + 120;
+  // Scale based on width only — height will follow content aspect ratio
+  const autoScale = (width / contentWidth) * scale;
+  // Actual rendered height = content height scaled
+  const renderedHeight = Math.ceil(contentHeight * autoScale);
 
   // Is this a multi-room floor plan?
   const isFloorPlan = drawingData.walls.length > 4;
@@ -681,8 +712,8 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
   };
 
   return (
-    <div className="border border-gray-300 rounded-lg overflow-hidden">
-      <Stage width={width} height={height} scaleX={autoScale} scaleY={autoScale}>
+    <div className="border border-gray-300 rounded-lg overflow-hidden w-full">
+      <Stage ref={stageRef} width={width} height={renderedHeight} scaleX={autoScale} scaleY={autoScale}>
         <Layer>
           {/* 1. Room background */}
           <Rect
@@ -723,3 +754,6 @@ export default function Canvas2D({ drawingData, width = 800, height = 600, scale
     </div>
   );
 }
+);
+
+export default Canvas2D;
