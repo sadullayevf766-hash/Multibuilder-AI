@@ -1,5 +1,5 @@
 ==> Cloning from https://github.com/sadullayevf766-hash/Multibuilder-AI
-==> Checking out commit 4893978d7b01abfb847d17ce0a8e41476ab3722f in branch main
+==> Checking out commit 342273146deecfc8f2e21af5b9f83db4476e918d in branch main
 ==> Using Node.js version 22.22.0 (default)
 ==> Docs on specifying a Node.js version: https://render.com/docs/node-version
 ==> Running build command 'npm install && npm run build --workspace=client && npm run build --workspace=server'...
@@ -9,12 +9,12 @@ added 154 packages, and audited 158 packages in 3s
 found 0 vulnerabilities
 > client@1.0.0 build
 > vite build
-Menu
 sh: 1: vite: not found
 npm error Lifecycle script `build` failed with error:
 npm error code 127
 npm error path /opt/render/project/src/client
 npm error workspace client@1.0.0
+Menu
 npm error location /opt/render/project/src/client
 npm error command failed
 npm error command sh -c vite build
