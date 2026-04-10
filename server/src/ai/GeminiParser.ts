@@ -61,6 +61,11 @@ interface ArchitectResponse {
   }>;
 }
 
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // PARSER CLASS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -74,6 +79,49 @@ export class GeminiParser {
   constructor(geminiKey: string, groqKey?: string) {
     this.geminiKey = geminiKey;
     this.groqKey = groqKey || process.env.GROQ_API_KEY || '';
+  }
+
+  // Parse with conversation history — used for project editing
+  async parseWithHistory(userMessage: string, history: ChatMessage[]): Promise<RoomSpec | FloorPlan> {
+    console.log('[PARSER] parseWithHistory, history length:', history.length);
+
+    // Build context from history: summarize previous state
+    const hasHistory = history.length > 0;
+
+    if (hasHistory && this.groqKey) {
+      try {
+        const result = await this.callGroqWithHistory(userMessage, history);
+        const parsed = this.convertArchitectJSON(result, userMessage);
+        console.log('[MODE] LIVE via Groq (history)');
+        return parsed;
+      } catch (err) {
+        console.log('[GROQ HISTORY] Failed:', (err as Error).message);
+      }
+    }
+
+    if (hasHistory && this.geminiKey) {
+      try {
+        const result = await this.callGeminiWithHistory(userMessage, history);
+        const parsed = this.convertArchitectJSON(result, userMessage);
+        console.log('[MODE] LIVE via Gemini (history)');
+        return parsed;
+      } catch (err) {
+        console.log('[GEMINI HISTORY] Failed:', (err as Error).message);
+      }
+    }
+
+    // Fallback: merge last assistant message context with new user message
+    if (hasHistory) {
+      const lastAssistant = [...history].reverse().find(m => m.role === 'assistant');
+      if (lastAssistant) {
+        // Build merged description: previous context + new instruction
+        const mergedDesc = `${lastAssistant.content}\n\nO'zgartirish: ${userMessage}`;
+        console.log('[MODE] Local parser with merged context');
+        return this.smartLocalParse(mergedDesc);
+      }
+    }
+
+    return this.parseDescription(userMessage);
   }
 
   async parseDescription(description: string): Promise<RoomSpec | FloorPlan> {
@@ -203,6 +251,97 @@ export class GeminiParser {
       const data = await response.json();
       const text = data.choices[0].message.content;
       console.log('[GROQ RAW]', text.slice(0, 300));
+      return this.extractJSON(text);
+    } catch (err) {
+      clearTimeout(timeout);
+      throw err;
+    }
+  }
+
+  // Groq with conversation history
+  private async callGroqWithHistory(userMessage: string, history: ChatMessage[]): Promise<ArchitectResponse> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 25000);
+
+    // Build messages: system + history + new user message
+    const messages: Array<{ role: string; content: string }> = [
+      { role: 'system', content: ARCHITECT_SYSTEM_PROMPT }
+    ];
+
+    // Add history (keep last 6 messages to avoid token limit)
+    const recentHistory = history.slice(-6);
+    for (const msg of recentHistory) {
+      messages.push({ role: msg.role, content: msg.content });
+    }
+    messages.push({ role: 'user', content: userMessage });
+
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.groqKey}`
+        },
+        body: JSON.stringify({
+          model: 'llama-3.3-70b-versatile',
+          temperature: 0.1,
+          max_tokens: 2000,
+          messages
+        }),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeout);
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Groq ${response.status}: ${errText}`);
+      }
+
+      const data = await response.json();
+      const text = data.choices[0].message.content;
+      console.log('[GROQ HISTORY RAW]', text.slice(0, 200));
+      return this.extractJSON(text);
+    } catch (err) {
+      clearTimeout(timeout);
+      throw err;
+    }
+  }
+
+  // Gemini with conversation history
+  private async callGeminiWithHistory(userMessage: string, history: ChatMessage[]): Promise<ArchitectResponse> {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${this.geminiKey}`;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30000);
+
+    // Build Gemini contents array with history
+    const contents: Array<{ role: string; parts: Array<{ text: string }> }> = [];
+
+    const recentHistory = history.slice(-6);
+    for (const msg of recentHistory) {
+      contents.push({
+        role: msg.role === 'user' ? 'user' : 'model',
+        parts: [{ text: msg.content }]
+      });
+    }
+    contents.push({ role: 'user', parts: [{ text: userMessage }] });
+
+    try {
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: ARCHITECT_SYSTEM_PROMPT }] },
+          contents
+        }),
+        signal: controller.signal
+      });
+
+      clearTimeout(timeout);
+      if (!response.ok) throw new Error(`Gemini ${response.status}: ${response.statusText}`);
+
+      const data = await response.json();
+      const text = data.candidates[0].content.parts[0].text;
+      console.log('[GEMINI HISTORY RAW]', text.slice(0, 200));
       return this.extractJSON(text);
     } catch (err) {
       clearTimeout(timeout);

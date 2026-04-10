@@ -9,6 +9,7 @@ CREATE TABLE projects (
   user_id uuid REFERENCES auth.users NOT NULL,
   name text NOT NULL,
   drawing_data jsonb NOT NULL DEFAULT '{}',
+  messages jsonb NOT NULL DEFAULT '[]',
   deleted_at timestamptz DEFAULT NULL,
   created_at timestamptz DEFAULT now() NOT NULL,
   updated_at timestamptz DEFAULT now() NOT NULL
@@ -32,3 +33,7 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER projects_updated_at
   BEFORE UPDATE ON projects
   FOR EACH ROW EXECUTE FUNCTION update_updated_at();
+
+-- 5. Add columns to existing table (if already exists, run only these):
+-- ALTER TABLE projects ADD COLUMN IF NOT EXISTS messages jsonb NOT NULL DEFAULT '[]';
+-- ALTER TABLE projects ADD COLUMN IF NOT EXISTS deleted_at timestamptz DEFAULT NULL;

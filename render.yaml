@@ -1,15 +1,19 @@
 services:
   - type: web
-    name: floorplan-generator
+    name: floorplan-ai
     env: node
-    buildCommand: npm install && npm run build --workspace=server
-    startCommand: npm run start --workspace=server
+    region: oregon
+    plan: free
+    buildCommand: npm install && npm run build --workspace=client && npm run build --workspace=server
+    startCommand: node server/dist/index.js
     envVars:
       - key: NODE_ENV
         value: production
       - key: PORT
-        value: 5000
+        value: 10000
       - key: GEMINI_API_KEY
+        sync: false
+      - key: GROQ_API_KEY
         sync: false
       - key: SUPABASE_URL
         sync: false

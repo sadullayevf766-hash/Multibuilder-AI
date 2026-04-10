@@ -43,20 +43,35 @@ export interface ProjectRecord {
 export async function saveProject(
   userId: string,
   name: string,
-  _description: string,
+  initialPrompt: string,
   drawingData: unknown,
   authHeader?: string
 ) {
-  // Use user's token if provided (respects RLS), otherwise service client
   const sb = authHeader ? getUserClient(authHeader) : getServiceClient();
+
+  // Initial message history
+  const messages = initialPrompt
+    ? [{ role: 'user', content: initialPrompt }]
+    : [];
 
   const { data, error } = await sb
     .from('projects')
-    .insert({ user_id: userId, name, drawing_data: drawingData })
+    .insert({ user_id: userId, name, drawing_data: drawingData, messages })
     .select()
     .single();
 
-  if (error) throw new Error(error.message);
+  if (error) {
+    if (error.message.includes('messages')) {
+      const { data: d2, error: e2 } = await sb
+        .from('projects')
+        .insert({ user_id: userId, name, drawing_data: drawingData })
+        .select()
+        .single();
+      if (e2) throw new Error(e2.message);
+      return d2;
+    }
+    throw new Error(error.message);
+  }
   return data;
 }
 
@@ -162,4 +177,34 @@ export async function getTrash(userId: string, authHeader?: string) {
   if (error && error.message.includes('deleted_at')) return [];
   if (error) throw new Error(error.message);
   return data || [];
+}
+
+export async function updateProjectDrawing(
+  id: string,
+  drawingData: unknown,
+  messages: Array<{ role: string; content: string }>,
+  authHeader?: string
+) {
+  const sb = authHeader ? getUserClient(authHeader) : getServiceClient();
+  const { data, error } = await sb
+    .from('projects')
+    .update({ drawing_data: drawingData, messages })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) {
+    // messages column may not exist — update only drawing_data
+    if (error.message.includes('messages')) {
+      const { data: d2, error: e2 } = await sb
+        .from('projects')
+        .update({ drawing_data: drawingData })
+        .eq('id', id)
+        .select()
+        .single();
+      if (e2) throw new Error(e2.message);
+      return d2;
+    }
+    throw new Error(error.message);
+  }
+  return data;
 }

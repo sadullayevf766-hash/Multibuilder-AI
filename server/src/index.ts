@@ -1,12 +1,16 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { GeminiParser } from './ai/GeminiParser';
 import { FloorPlanEngine } from './engine/FloorPlanEngine';
 import { exportToDxf } from './export/DxfExporter';
 import { PdfExporter } from './export/PdfExporter';
-import { saveProject, getProjectHistory, getProject, renameProject, softDeleteProject, restoreProject, hardDeleteProject, getTrash } from './db/supabase';
+import { saveProject, getProjectHistory, getProject, renameProject, softDeleteProject, restoreProject, hardDeleteProject, getTrash, updateProjectDrawing } from './db/supabase';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Try loading from server/.env first, then fallback to .env in cwd
 dotenv.config({ path: join(process.cwd(), 'server', '.env') });
@@ -16,7 +20,13 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+
+// Serve client static files in production
+if (process.env.NODE_ENV === 'production') {
+  const clientDist = join(__dirname, '../../client/dist');
+  app.use(express.static(clientDist));
+}
 
 const geminiParser = new GeminiParser(
   process.env.GEMINI_API_KEY || '',
@@ -215,6 +225,50 @@ app.delete('/api/project/:id/permanent', async (req, res) => {
     res.status(500).json({ error: 'Failed to permanently delete', message: error instanceof Error ? error.message : 'Unknown' });
   }
 });
+
+// Update project drawing (edit/regenerate with conversation history)
+app.patch('/api/project/:id/drawing', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { userMessage, history } = req.body;
+    const authHeader = req.headers.authorization;
+
+    if (!userMessage) return res.status(400).json({ error: 'userMessage is required' });
+
+    // 1. Parse with conversation history
+    const parsed = await geminiParser.parseWithHistory(userMessage, history || []);
+
+    // 2. Generate drawing
+    let drawingData;
+    if ('rooms' in parsed) {
+      drawingData = floorPlanEngine.generateFloorPlan(parsed);
+    } else {
+      drawingData = floorPlanEngine.generateDrawing(parsed);
+    }
+
+    // 3. Build updated messages array
+    const updatedMessages = [
+      ...(history || []),
+      { role: 'user', content: userMessage },
+      { role: 'assistant', content: userMessage } // store user prompt as context marker
+    ];
+
+    // 4. Save to DB
+    const project = await updateProjectDrawing(id, drawingData, updatedMessages, authHeader);
+    res.json({ ...project, drawingData });
+  } catch (error) {
+    console.error('Update drawing error:', error);
+    res.status(500).json({ error: 'Failed to update drawing', message: error instanceof Error ? error.message : 'Unknown' });
+  }
+});
+
+// SPA fallback — serve index.html for all non-API routes in production
+if (process.env.NODE_ENV === 'production') {
+  const clientDist = join(__dirname, '../../client/dist');
+  app.get('*', (_req, res) => {
+    res.sendFile(join(clientDist, 'index.html'));
+  });
+}
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

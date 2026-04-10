@@ -5,22 +5,23 @@ import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 import type { DrawingData } from '../../../shared/types';
 
-type LoadingState = 'idle' | 'generating' | 'rendering' | 'ready' | 'error' | 'saving';
+type LoadingState = 'idle' | 'generating' | 'rendering' | 'saving' | 'ready' | 'error';
 
-const FAVICONS: Record<LoadingState, string> = {
-  idle:       `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%233b82f6'/><rect x='6' y='6' width='20' height='20' rx='2' fill='none' stroke='white' stroke-width='2'/><line x1='6' y1='16' x2='26' y2='16' stroke='white' stroke-width='1.5'/><line x1='16' y1='6' x2='16' y2='26' stroke='white' stroke-width='1.5'/></svg>`,
-  generating: `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23f59e0b'/><circle cx='16' cy='16' r='10' fill='none' stroke='white' stroke-width='2.5' stroke-dasharray='16 48' stroke-linecap='round'><animateTransform attributeName='transform' type='rotate' from='0 16 16' to='360 16 16' dur='0.8s' repeatCount='indefinite'/></circle></svg>`,
-  rendering:  `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%238b5cf6'/><circle cx='16' cy='16' r='10' fill='none' stroke='white' stroke-width='2.5' stroke-dasharray='24 40' stroke-linecap='round'><animateTransform attributeName='transform' type='rotate' from='0 16 16' to='360 16 16' dur='0.6s' repeatCount='indefinite'/></circle></svg>`,
-  saving:     `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2306b6d4'/><circle cx='16' cy='16' r='10' fill='none' stroke='white' stroke-width='2.5' stroke-dasharray='20 44' stroke-linecap='round'><animateTransform attributeName='transform' type='rotate' from='0 16 16' to='360 16 16' dur='0.7s' repeatCount='indefinite'/></circle></svg>`,
-  ready:      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2322c55e'/><polyline points='8,17 13,22 24,11' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/></svg>`,
-  error:      `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%23ef4444'/><line x1='10' y1='10' x2='22' y2='22' stroke='white' stroke-width='3' stroke-linecap='round'/><line x1='22' y1='10' x2='10' y2='22' stroke='white' stroke-width='3' stroke-linecap='round'/></svg>`,
+const FAVICON_PATHS: Record<LoadingState, string> = {
+  idle:       '/favicon-idle.png',
+  generating: '/favicon-generating.png',
+  rendering:  '/favicon-rendering.png',
+  saving:     '/favicon-saving.png',
+  ready:      `data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2322c55e'/><polyline points='8,17 13,22 24,11' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'/></svg>`,
+  error:      '/favicon-error.png',
 };
 
 function setFavicon(state: LoadingState) {
-  const url = `data:image/svg+xml,${FAVICONS[state]}`;
+  const url = FAVICON_PATHS[state];
   let link = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
   if (!link) { link = document.createElement('link'); link.rel = 'icon'; document.head.appendChild(link); }
   link.href = url;
+  link.type = url.startsWith('data:') ? 'image/svg+xml' : 'image/png';
 }
 
 const EXAMPLES = [
@@ -39,17 +40,17 @@ export default function Generator() {
   const [loadingState, setLoadingState] = useState<LoadingState>('idle');
   const [drawingData, setDrawingData] = useState<DrawingData | null>(null);
   const [error, setError] = useState('');
-  const [projectName, setProjectName] = useState('');
-  const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [canvasWidth, setCanvasWidth] = useState(900);
+  // Auto-save name dialog
+  const [showNameDialog, setShowNameDialog] = useState(false);
+  const [projectName, setProjectName] = useState('');
+  const [pendingDrawing, setPendingDrawing] = useState<DrawingData | null>(null);
 
   useEffect(() => { setFavicon(loadingState); }, [loadingState]);
 
   useEffect(() => {
     const update = () => {
-      if (containerRef.current) {
-        setCanvasWidth(containerRef.current.offsetWidth);
-      }
+      if (containerRef.current) setCanvasWidth(containerRef.current.offsetWidth);
     };
     update();
     window.addEventListener('resize', update);
@@ -71,26 +72,31 @@ export default function Generator() {
       if (!response.ok) throw new Error('Chizma yaratishda xatolik yuz berdi');
       const data = await response.json();
       setLoadingState('rendering');
-      setTimeout(() => { setDrawingData(data.drawingData); setLoadingState('ready'); }, 500);
+      setTimeout(() => {
+        const drawing = data.drawingData;
+        setDrawingData(drawing);
+        setLoadingState('ready');
+        // Trigger auto-save: ask for project name
+        setPendingDrawing(drawing);
+        setShowNameDialog(true);
+      }, 500);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Noma'lum xatolik");
       setLoadingState('error');
     }
   };
 
-  const handleSave = async () => {
-    if (!projectName.trim()) { setError('Iltimos, loyiha nomini kiriting'); return; }
-    if (!user) { navigate('/login'); return; }
+  const handleAutoSave = async () => {
+    if (!projectName.trim() || !pendingDrawing || !user) return;
     try {
       setLoadingState('saving');
-      setError('');
-      setShowSaveDialog(false);
+      setShowNameDialog(false);
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) { navigate('/login'); return; }
       const response = await fetch('/api/projects', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
-        body: JSON.stringify({ userId: user.id, name: projectName, description, drawingData })
+        body: JSON.stringify({ userId: user.id, name: projectName, description, drawingData: pendingDrawing })
       });
       if (!response.ok) { const d = await response.json(); throw new Error(d.message || 'Saqlashda xatolik'); }
       const project = await response.json();
@@ -99,6 +105,11 @@ export default function Generator() {
       setError(err instanceof Error ? err.message : "Noma'lum xatolik");
       setLoadingState('ready');
     }
+  };
+
+  const handleSkipSave = () => {
+    setShowNameDialog(false);
+    setPendingDrawing(null);
   };
 
   const handleDownloadDxf = async () => {
@@ -113,7 +124,7 @@ export default function Generator() {
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = `floorplan-${drawingData.id}.dxf`; a.click();
-    } catch (err) { setError('DXF faylni yuklab olishda xatolik'); }
+    } catch { setError('DXF faylni yuklab olishda xatolik'); }
   };
 
   const handleDownloadPdf = () => {
@@ -122,25 +133,22 @@ export default function Generator() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-black text-gray-900 dark:text-white transition-colors duration-300">
-      {/* Navbar */}
-      <header className="sticky top-0 z-50 bg-white/90 dark:bg-black/80 backdrop-blur-md border-b border-black/10 dark:border-white/10">
+    <div className="min-h-screen bg-black text-white">
+      <header className="sticky top-0 z-50 bg-black/80 backdrop-blur-md border-b border-white/10">
         <div className="max-w-7xl mx-auto px-4 md:px-8 py-3 flex items-center justify-between">
           <Link to="/dashboard" className="text-lg font-semibold tracking-tight">FloorPlan AI</Link>
-          <div className="flex items-center gap-3">
-            <Link to="/dashboard" className="text-sm text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">← Dashboard</Link>
-          </div>
+          <Link to="/dashboard" className="text-sm text-gray-400 hover:text-white transition-colors">← Dashboard</Link>
         </div>
       </header>
 
       <main className="max-w-7xl mx-auto px-4 md:px-8 py-8">
-        <div className="mb-8">
-          <h1 className="text-2xl md:text-3xl font-light" style={{ letterSpacing: '-0.02em' }}>Reja Generatori</h1>
-          <p className="text-gray-500 text-sm mt-1">Xona tavsifini yozing — AI chizma yaratadi</p>
+        <div className="mb-6">
+          <h1 className="text-2xl md:text-3xl font-light" style={{ letterSpacing: '-0.02em' }}>Yangi loyiha</h1>
+          <p className="text-gray-500 text-sm mt-1">Xona tavsifini yozing — AI chizma yaratadi va avtomatik saqlanadi</p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-          {/* Left: Input panel */}
+          {/* Input panel */}
           <div className="lg:col-span-2 space-y-4">
             <div className="liquid-glass border border-white/10 rounded-2xl p-5">
               <label className="block text-sm text-gray-300 mb-2">Xona tavsifi</label>
@@ -153,18 +161,13 @@ export default function Generator() {
                 disabled={isLoading}
               />
               <p className="text-xs text-gray-600 mt-1.5">Ctrl+Enter — yaratish</p>
-
               {error && (
                 <div className="mt-3 bg-red-500/10 border border-red-500/20 rounded-xl p-3">
                   <p className="text-red-400 text-sm">{error}</p>
                 </div>
               )}
-
-              <button
-                onClick={handleGenerate}
-                disabled={isLoading}
-                className="mt-4 w-full bg-white text-black py-3 rounded-xl text-sm font-medium hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-              >
+              <button onClick={handleGenerate} disabled={isLoading}
+                className="mt-4 w-full bg-white text-black py-3 rounded-xl text-sm font-medium hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
                 {loadingState === 'generating' && '⏳ Yaratilmoqda...'}
                 {loadingState === 'rendering' && '🎨 Chizilmoqda...'}
                 {loadingState === 'saving' && '💾 Saqlanmoqda...'}
@@ -172,7 +175,6 @@ export default function Generator() {
               </button>
             </div>
 
-            {/* Example prompts */}
             <div className="liquid-glass border border-white/10 rounded-2xl p-5">
               <p className="text-xs text-gray-500 uppercase tracking-widest mb-3">Misollar</p>
               <div className="space-y-2">
@@ -186,44 +188,40 @@ export default function Generator() {
             </div>
           </div>
 
-          {/* Right: Canvas panel */}
+          {/* Canvas panel */}
           <div className="lg:col-span-3">
             {loadingState === 'idle' && (
-              <div className="liquid-glass border border-white/10 rounded-2xl h-full min-h-64 flex items-center justify-center">
+              <div className="liquid-glass border border-white/10 rounded-2xl min-h-64 flex items-center justify-center">
                 <div className="text-center">
                   <div className="text-5xl mb-4">📐</div>
                   <p className="text-gray-500 text-sm">Chizma bu yerda ko'rinadi</p>
                 </div>
               </div>
             )}
-
-            {(loadingState === 'generating' || loadingState === 'rendering') && (
-              <div className="liquid-glass border border-white/10 rounded-2xl h-full min-h-64 flex items-center justify-center">
+            {(loadingState === 'generating' || loadingState === 'rendering' || loadingState === 'saving') && (
+              <div className="liquid-glass border border-white/10 rounded-2xl min-h-64 flex items-center justify-center">
                 <div className="text-center">
                   <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-white/40 mx-auto mb-4"></div>
                   <p className="text-gray-400 text-sm">
-                    {loadingState === 'generating' ? 'AI tahlil qilmoqda...' : 'Chizma chizilmoqda...'}
+                    {loadingState === 'generating' ? 'AI tahlil qilmoqda...' : loadingState === 'saving' ? 'Saqlanmoqda...' : 'Chizma chizilmoqda...'}
                   </p>
                 </div>
               </div>
             )}
-
             {loadingState === 'error' && (
-              <div className="liquid-glass border border-red-500/20 rounded-2xl h-full min-h-64 flex items-center justify-center">
+              <div className="liquid-glass border border-red-500/20 rounded-2xl min-h-64 flex items-center justify-center">
                 <div className="text-center">
                   <div className="text-4xl mb-3">⚠️</div>
                   <p className="text-red-400 text-sm">Xatolik yuz berdi. Qayta urinib ko'ring.</p>
                 </div>
               </div>
             )}
-
             {loadingState === 'ready' && drawingData && (
               <div className="liquid-glass border border-white/10 rounded-2xl overflow-hidden">
-                {/* Canvas toolbar */}
                 <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
                   <span className="text-sm text-gray-400">Chizma tayyor</span>
                   <div className="flex flex-wrap gap-2">
-                    <button onClick={() => setShowSaveDialog(true)}
+                    <button onClick={() => { setPendingDrawing(drawingData); setShowNameDialog(true); }}
                       className="px-3 py-1.5 bg-white text-black rounded-lg text-xs font-medium hover:bg-gray-100 transition-colors">
                       💾 Saqlash
                     </button>
@@ -246,28 +244,29 @@ export default function Generator() {
         </div>
       </main>
 
-      {/* Save dialog */}
-      {showSaveDialog && (
+      {/* Auto-save name dialog */}
+      {showNameDialog && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 z-50">
           <div className="glass-card rounded-2xl p-6 w-full max-w-sm">
-            <h3 className="text-lg font-medium text-white mb-4">Loyihani saqlash</h3>
+            <h3 className="text-lg font-medium text-white mb-1">Loyihani saqlash</h3>
+            <p className="text-gray-400 text-sm mb-4">Chizma tayyor. Loyiha nomini kiriting va saqlang.</p>
             <input
               type="text"
               value={projectName}
               onChange={e => setProjectName(e.target.value)}
-              onKeyDown={e => { if (e.key === 'Enter') handleSave(); }}
-              placeholder="Loyiha nomi"
+              onKeyDown={e => { if (e.key === 'Enter') handleAutoSave(); }}
+              placeholder="Masalan: Uy loyihasi"
               className="glass-input w-full px-4 py-3 rounded-xl text-sm mb-4"
               autoFocus
             />
             <div className="flex gap-3">
-              <button onClick={() => setShowSaveDialog(false)}
+              <button onClick={handleSkipSave}
                 className="flex-1 py-2.5 bg-white/10 text-gray-300 rounded-xl text-sm hover:bg-white/20 transition-colors">
-                Bekor
+                Keyinroq
               </button>
-              <button onClick={handleSave}
-                className="flex-1 py-2.5 bg-white text-black rounded-xl text-sm font-medium hover:bg-gray-100 transition-colors">
-                Saqlash
+              <button onClick={handleAutoSave} disabled={!projectName.trim()}
+                className="flex-1 py-2.5 bg-white text-black rounded-xl text-sm font-medium hover:bg-gray-100 disabled:opacity-50 transition-colors">
+                Saqlash →
               </button>
             </div>
           </div>
