@@ -1,5 +1,5 @@
 ==> Cloning from https://github.com/sadullayevf766-hash/Multibuilder-AI
-==> Checking out commit 8ecc15aa1cdd9f88b6e2fd2f38701f2d2df6c3e0 in branch main
+==> Checking out commit 9e0edda5c66dc64d87aca9543ebf12222ea24af0 in branch main
 ==> Using Node.js version 22.22.0 (default)
 ==> Docs on specifying a Node.js version: https://render.com/docs/node-version
 ==> Running build command 'npm install --prefix client --legacy-peer-deps && npm install --prefix server && client/node_modules/.bin/vite build --root client --outDir dist && npm run build --workspace=server'...
