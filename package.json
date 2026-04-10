@@ -11,9 +11,10 @@
     "dev": "concurrently \"npm run dev:client\" \"npm run dev:server\"",
     "dev:client": "npm run dev --workspace=client",
     "dev:server": "npm run dev --workspace=server",
-    "build": "npm run build --workspace=client && npm run build --workspace=server",
-    "start": "node server/dist/src/index.js",
-    "install:all": "npm install && npm install --prefix client && npm install --prefix server"
+    "build": "npm run build:client && npm run build:server",
+    "build:client": "npm install --prefix client --legacy-peer-deps && cd client && node_modules/.bin/vite build",
+    "build:server": "npm install --prefix server && cd server && node_modules/.bin/tsc",
+    "start": "node server/dist/src/index.js"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
