@@ -363,7 +363,7 @@ function Canvas2D({ drawingData, width = 800, height = 600, scale = 1 }, ref) {
         return (
           <Group key={fixture.id}>
             <Rect x={x} y={y} width={50} height={50} fill="#f0f0f0" stroke="#1a1a1a" strokeWidth={1} />
-            <KonvaText x={x+2} y={y+18} text={FIXTURE_LABELS[type] || type.replace(/_/g,' ').slice(0,10)} fontSize={8} fill="#555" width={46} align="center" />
+            <KonvaText key={fixture.id + '-type'} x={x+2} y={y+18} text={FIXTURE_LABELS[type] || type.replace(/_/g,' ').slice(0,10)} fontSize={8} fill="#555" width={46} align="center" />
           </Group>
         );
     }
@@ -591,6 +591,7 @@ function Canvas2D({ drawingData, width = 800, height = 600, scale = 1 }, ref) {
       return (
         <Group key={dim.id}>
           <KonvaText
+            key={dim.id + '-text'}
             x={midX - 50}
             y={midY - 8}
             text={dim.label}
@@ -624,6 +625,7 @@ function Canvas2D({ drawingData, width = 800, height = 600, scale = 1 }, ref) {
     return (
       <Group key={dim.id}>
         <Arrow
+          key={dim.id + '-arrow'}
           points={[arrowStart.x, arrowStart.y, arrowEnd.x, arrowEnd.y]}
           stroke="#1a1a1a"
           strokeWidth={1}
@@ -632,6 +634,7 @@ function Canvas2D({ drawingData, width = 800, height = 600, scale = 1 }, ref) {
           pointerAtBeginning
         />
         <KonvaText
+          key={dim.id + '-label'}
           x={midX + nx * offset - 20}
           y={midY + ny * offset - 15}
           text={dim.label}
@@ -676,7 +679,6 @@ function Canvas2D({ drawingData, width = 800, height = 600, scale = 1 }, ref) {
   };
 
   const renderTitleBlock = () => {
-    // Bottom-right corner, always visible
     const blockW = 180;
     const blockH = 70;
     const blockX = Math.max(totalWidth + CANVAS_PADDING - blockW - 5, CANVAS_PADDING + 160);
@@ -684,35 +686,35 @@ function Canvas2D({ drawingData, width = 800, height = 600, scale = 1 }, ref) {
     const date = new Date().toLocaleDateString('uz-UZ');
 
     return (
-      <Group>
+      <Group key="title-block">
         <Rect x={blockX} y={blockY} width={blockW} height={blockH} stroke="#1a1a1a" strokeWidth={1} fill="white" />
-        <KonvaText x={blockX + 8} y={blockY + 8}  text="Floor Plan" fontSize={11} fontFamily="monospace" fontStyle="bold" />
-        <KonvaText x={blockX + 8} y={blockY + 24} text="Masshtab: 1:50" fontSize={9} fontFamily="monospace" />
-        <KonvaText x={blockX + 8} y={blockY + 38} text={`Sana: ${date}`} fontSize={9} fontFamily="monospace" />
-        <KonvaText x={blockX + 8} y={blockY + 52} text="SNiP 2.04.01-85" fontSize={9} fontFamily="monospace" fill="#555" />
+        <KonvaText key="tb-1" x={blockX + 8} y={blockY + 8}  text="Floor Plan" fontSize={11} fontFamily="monospace" fontStyle="bold" />
+        <KonvaText key="tb-2" x={blockX + 8} y={blockY + 24} text="Masshtab: 1:50" fontSize={9} fontFamily="monospace" />
+        <KonvaText key="tb-3" x={blockX + 8} y={blockY + 38} text={`Sana: ${date}`} fontSize={9} fontFamily="monospace" />
+        <KonvaText key="tb-4" x={blockX + 8} y={blockY + 52} text="SNiP 2.04.01-85" fontSize={9} fontFamily="monospace" fill="#555" />
       </Group>
     );
   };
 
   const renderLegend = () => {
-    // Bottom-left corner
     const lx = CANVAS_PADDING;
     const ly = totalHeight + CANVAS_PADDING + 25;
 
     return (
-      <Group>
-        <Line points={[lx, ly + 8, lx + 25, ly + 8]} stroke="#3b82f6" strokeWidth={2} opacity={0.8} />
-        <KonvaText x={lx + 30} y={ly + 2} text="Sovuq suv (H)" fontSize={9} fontFamily="monospace" />
-        <Line points={[lx, ly + 22, lx + 25, ly + 22]} stroke="#ef4444" strokeWidth={2} opacity={0.8} />
-        <KonvaText x={lx + 30} y={ly + 16} text="Issiq suv (I)" fontSize={9} fontFamily="monospace" />
-        <Line points={[lx, ly + 36, lx + 25, ly + 36]} stroke="#64748b" strokeWidth={1.5} dash={[4, 4]} opacity={0.6} />
-        <KonvaText x={lx + 30} y={ly + 30} text="Kanalizatsiya (K)" fontSize={9} fontFamily="monospace" />
+      <Group key="legend">
+        <Line key="leg-l1" points={[lx, ly + 8, lx + 25, ly + 8]} stroke="#3b82f6" strokeWidth={2} opacity={0.8} />
+        <KonvaText key="leg-t1" x={lx + 30} y={ly + 2} text="Sovuq suv (H)" fontSize={9} fontFamily="monospace" />
+        <Line key="leg-l2" points={[lx, ly + 22, lx + 25, ly + 22]} stroke="#ef4444" strokeWidth={2} opacity={0.8} />
+        <KonvaText key="leg-t2" x={lx + 30} y={ly + 16} text="Issiq suv (I)" fontSize={9} fontFamily="monospace" />
+        <Line key="leg-l3" points={[lx, ly + 36, lx + 25, ly + 36]} stroke="#64748b" strokeWidth={1.5} dash={[4, 4]} opacity={0.6} />
+        <KonvaText key="leg-t3" x={lx + 30} y={ly + 30} text="Kanalizatsiya (K)" fontSize={9} fontFamily="monospace" />
       </Group>
     );
   };
 
   return (
     <div className="border border-gray-300 rounded-lg overflow-hidden w-full">
+      {/* @ts-ignore react-konva children type */}
       <Stage ref={stageRef} key={`${width}-${drawingData.id}`} width={width} height={renderedHeight} scaleX={autoScale} scaleY={autoScale}>
         <Layer>
           {/* 1. Room background */}
