@@ -20,8 +20,8 @@ app.use(express.json({ limit: '10mb' }));
 
 // Serve client static files in production
 if (process.env.NODE_ENV === 'production') {
-  // __dirname = server/dist/src/, client/dist = ../../../client/dist
-  const clientDist = join(__dirname, '../../../client/dist');
+  // process.cwd() = repo root on Render
+  const clientDist = join(process.cwd(), 'client', 'dist');
   app.use(express.static(clientDist));
 }
 
@@ -261,7 +261,7 @@ app.patch('/api/project/:id/drawing', async (req, res) => {
 
 // SPA fallback — serve index.html for all non-API routes in production
 if (process.env.NODE_ENV === 'production') {
-  const clientDist = join(__dirname, '../../../client/dist');
+  const clientDist = join(process.cwd(), 'client', 'dist');
   app.get('*', (_req, res) => {
     res.sendFile(join(clientDist, 'index.html'));
   });
