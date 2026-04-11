@@ -1,11 +1,3 @@
-==> Cloning from https://github.com/sadullayevf766-hash/Multibuilder-AI
-==> Checking out commit 436b4941433966238b6b065b19a798247719c563 in branch main
-==> Using Node.js version 22.22.0 (default)
-==> Docs on specifying a Node.js version: https://render.com/docs/node-version
-==> Running build command 'NODE_ENV=development npm install --prefix client --legacy-peer-deps && NODE_ENV=development npm install --prefix server && client/node_modules/.bin/vite build --root client --outDir dist && npm run build --workspace=server'...
-added 177 packages, and audited 178 packages in 13s
-28 packages are looking for funding
-  run `npm fund` for details
 2 moderate severity vulnerabilities
 To address all issues (including breaking changes), run:
   npm audit fix --force
@@ -17,17 +9,33 @@ added 200 packages, and audited 201 packages in 9s
 To address all issues (including breaking changes), run:
   npm audit fix --force
 Run `npm audit` for details.
-file:///opt/render/project/src/client/node_modules/vite/dist/node/cli.js:445
-          throw new CACError(`Unknown option \`${name.length > 1 ? `--${name}` : `-${name}`}\``);
-                ^
-CACError: Unknown option `--root`
-    at Command.checkUnknownOptions (file:///opt/render/project/src/client/node_modules/vite/dist/node/cli.js:445:17)
+vite v5.4.21 building for production...
+transforming...
+✓ 656 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                              0.75 kB │ gzip:   0.43 kB
+dist/assets/index-CXuDTvF1.css              24.85 kB │ gzip:   5.47 kB
+dist/assets/purify.es-BgtpMKW3.js           22.77 kB │ gzip:   8.79 kB
+dist/assets/index.es-Ch0giBOl.js           150.69 kB │ gzip:  51.55 kB
+dist/assets/html2canvas.esm-CBrSDip1.js    201.42 kB │ gzip:  48.03 kB
+dist/assets/index-BC2IjL99.js            1,112.24 kB │ gzip: 340.53 kB
+✓ built in 4.67s
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+> server@1.0.0 build
+> tsc
+src/export/__tests__/PdfExporter.test.ts(8,9): error TS2741: Property 'doors' is missing in type '{ id: string; walls: { id: string; start: { x: number; y: number; }; end: { x: number; y: number; }; thickness: number; side: "north"; }[]; fixtures: never[]; pipes: never[]; dimensions: never[]; }' but required in type 'DrawingData'.
+src/export/__tests__/PdfExporter.test.ts(53,29): error TS2339: Property 'generateLegend' does not exist on type 'PdfExporter'.
+npm error Lifecycle script `build` failed with error:
 Menu
-    at CAC.runMatchedCommand (file:///opt/render/project/src/client/node_modules/vite/dist/node/cli.js:643:13)
-    at CAC.parse (file:///opt/render/project/src/client/node_modules/vite/dist/node/cli.js:582:12)
-    at file:///opt/render/project/src/client/node_modules/vite/dist/node/cli.js:915:5
-    at ModuleJob.run (node:internal/modules/esm/module_job:343:25)
-    at async onImport.tracePromise.__proto__ (node:internal/modules/esm/loader:665:26)
-Node.js v22.22.0
+npm error code 2
+npm error path /opt/render/project/src/server
+npm error workspace server@1.0.0
+npm error location /opt/render/project/src/server
+npm error command failed
+npm error command sh -c tsc
 ==> Build failed 😞
 ==> Common ways to troubleshoot your deploy: https://render.com/docs/troubleshooting-deploys
