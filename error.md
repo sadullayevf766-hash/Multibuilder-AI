@@ -1,3 +1,12 @@
+
+2 moderate severity vulnerabilities
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+Run `npm audit` for details.
+added 200 packages, and audited 201 packages in 9s
+46 packages are looking for funding
+  run `npm fund` for details
+4 moderate severity vulnerabilities
 To address all issues (including breaking changes), run:
   npm audit fix --force
 Run `npm audit` for details.
@@ -16,30 +25,17 @@ dist/assets/index-BC2IjL99.js            1,112.24 kB │ gzip: 340.53 kB
 - Using dynamic import() to code-split the application
 - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
 - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
-✓ built in 4.50s
+✓ built in 4.95s
 > server@1.0.0 build
 > tsc
-==> Uploading build...
-==> Uploaded in 3.6s. Compression took 2.2s
-==> Build successful 🎉
-==> Deploying...
-==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
-==> Running 'node server/dist/server/src/index.js'
-node:internal/modules/esm/resolve:274
-    throw new ERR_MODULE_NOT_FOUND(
-          ^
-Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/opt/render/project/src/server/dist/server/src/ai/GeminiParser' imported from /opt/render/project/src/server/dist/server/src/index.js
-    at finalizeResolution (node:internal/modules/esm/resolve:274:11)
-    at moduleResolve (node:internal/modules/esm/resolve:859:10)
-    at defaultResolve (node:internal/modules/esm/resolve:983:11)
-    at #cachedDefaultResolve (node:internal/modules/esm/loader:731:20)
-    at ModuleLoader.resolve (node:internal/modules/esm/loader:708:38)
-    at ModuleLoader.getModuleJobForImport (node:internal/modules/esm/loader:310:38)
-    at ModuleJob._link (node:internal/modules/esm/module_job:182:49) {
-  code: 'ERR_MODULE_NOT_FOUND',
-  url: 'file:///opt/render/project/src/server/dist/server/src/ai/GeminiParser'
-}
-Node.js v22.22.0
-==> Exited with status 1
+src/index.ts(12,34): error TS1343: The 'import.meta' meta-property is only allowed when the '--module' option is 'es2020', 'es2022', 'esnext', 'system', 'node16', 'node18', 'node20', or 'nodenext'.
+npm error Lifecycle script `build` failed with error:
+npm error code 2
+npm error path /opt/render/project/src/server
+npm error workspace server@1.0.0
 Menu
+npm error location /opt/render/project/src/server
+npm error command failed
+npm error command sh -c tsc
+==> Build failed 😞
 ==> Common ways to troubleshoot your deploy: https://render.com/docs/troubleshooting-deploys

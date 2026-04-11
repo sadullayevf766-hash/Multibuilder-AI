@@ -1,16 +1,12 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { join, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { join } from 'path';
 import { GeminiParser } from './ai/GeminiParser';
 import { FloorPlanEngine } from './engine/FloorPlanEngine';
 import { exportToDxf } from './export/DxfExporter';
 import { PdfExporter } from './export/PdfExporter';
 import { saveProject, getProjectHistory, getProject, renameProject, softDeleteProject, restoreProject, hardDeleteProject, getTrash, updateProjectDrawing } from './db/supabase';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
 
 // Try loading from server/.env first, then fallback to .env in cwd
 dotenv.config({ path: join(process.cwd(), 'server', '.env') });
