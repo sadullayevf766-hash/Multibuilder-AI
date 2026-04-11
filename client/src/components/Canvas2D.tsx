@@ -713,7 +713,7 @@ function Canvas2D({ drawingData, width = 800, height = 600, scale = 1 }, ref) {
 
   return (
     <div className="border border-gray-300 rounded-lg overflow-hidden w-full">
-      <Stage ref={stageRef} width={width} height={renderedHeight} scaleX={autoScale} scaleY={autoScale}>
+      <Stage ref={stageRef} key={`${width}-${drawingData.id}`} width={width} height={renderedHeight} scaleX={autoScale} scaleY={autoScale}>
         <Layer>
           {/* 1. Room background */}
           <Rect

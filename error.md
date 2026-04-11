@@ -1,1 +1,95 @@
-Error: ENOENT: no such file or directory, stat '/opt/render/project/src/server/client/dist/index.html'
+index-CZfN4iXn.js:94  POST https://uwihwbsdnfdaxtnffmsy.supabase.co/auth/v1/signup 422 (Unprocessable Content)
+(anonymous) @ index-CZfN4iXn.js:94
+UA @ index-CZfN4iXn.js:94
+mt @ index-CZfN4iXn.js:94
+signUp @ index-CZfN4iXn.js:109
+y @ index-CZfN4iXn.js:116
+DS @ index-CZfN4iXn.js:37
+BS @ index-CZfN4iXn.js:37
+zS @ index-CZfN4iXn.js:37
+l3 @ index-CZfN4iXn.js:37
+R_ @ index-CZfN4iXn.js:37
+(anonymous) @ index-CZfN4iXn.js:37
+qv @ index-CZfN4iXn.js:40
+n_ @ index-CZfN4iXn.js:37
+L2 @ index-CZfN4iXn.js:37
+mv @ index-CZfN4iXn.js:37
+r7 @ index-CZfN4iXn.js:37
+index-CZfN4iXn.js:150 NotFoundError: Failed to execute 'removeChild' on 'Node': The node to be removed is not a child of this node.
+    at S8 (index-CZfN4iXn.js:40:26100)
+    at Za (index-CZfN4iXn.js:40:27391)
+    at k8 (index-CZfN4iXn.js:40:27851)
+    at Za (index-CZfN4iXn.js:40:27541)
+    at k8 (index-CZfN4iXn.js:40:27851)
+    at Za (index-CZfN4iXn.js:40:27541)
+    at k8 (index-CZfN4iXn.js:40:27851)
+    at Za (index-CZfN4iXn.js:40:27541)
+    at k8 (index-CZfN4iXn.js:40:27851)
+    at Za (index-CZfN4iXn.js:40:27541)
+console.error @ index-CZfN4iXn.js:150
+s5 @ index-CZfN4iXn.js:40
+n.callback @ index-CZfN4iXn.js:40
+w3 @ index-CZfN4iXn.js:38
+I3 @ index-CZfN4iXn.js:40
+N8 @ index-CZfN4iXn.js:40
+pk @ index-CZfN4iXn.js:40
+wk @ index-CZfN4iXn.js:40
+hc @ index-CZfN4iXn.js:40
+D3 @ index-CZfN4iXn.js:40
+Lu @ index-CZfN4iXn.js:38
+(anonymous) @ index-CZfN4iXn.js:40
+index-CZfN4iXn.js:40 Uncaught NotFoundError: Failed to execute 'removeChild' on 'Node': The node to be removed is not a child of this node.
+    at S8 (index-CZfN4iXn.js:40:26100)
+    at Za (index-CZfN4iXn.js:40:27391)
+    at k8 (index-CZfN4iXn.js:40:27851)
+    at Za (index-CZfN4iXn.js:40:27541)
+    at k8 (index-CZfN4iXn.js:40:27851)
+    at Za (index-CZfN4iXn.js:40:27541)
+    at k8 (index-CZfN4iXn.js:40:27851)
+    at Za (index-CZfN4iXn.js:40:27541)
+    at k8 (index-CZfN4iXn.js:40:27851)
+    at Za (index-CZfN4iXn.js:40:27541)
+S8 @ index-CZfN4iXn.js:40
+Za @ index-CZfN4iXn.js:40
+k8 @ index-CZfN4iXn.js:40
+Za @ index-CZfN4iXn.js:40
+k8 @ index-CZfN4iXn.js:40
+Za @ index-CZfN4iXn.js:40
+k8 @ index-CZfN4iXn.js:40
+Za @ index-CZfN4iXn.js:40
+k8 @ index-CZfN4iXn.js:40
+Za @ index-CZfN4iXn.js:40
+k8 @ index-CZfN4iXn.js:40
+Za @ index-CZfN4iXn.js:40
+k8 @ index-CZfN4iXn.js:40
+Za @ index-CZfN4iXn.js:40
+k8 @ index-CZfN4iXn.js:40
+Za @ index-CZfN4iXn.js:40
+k8 @ index-CZfN4iXn.js:40
+Za @ index-CZfN4iXn.js:40
+k8 @ index-CZfN4iXn.js:40
+Za @ index-CZfN4iXn.js:40
+k8 @ index-CZfN4iXn.js:40
+Za @ index-CZfN4iXn.js:40
+k8 @ index-CZfN4iXn.js:40
+Za @ index-CZfN4iXn.js:40
+k8 @ index-CZfN4iXn.js:40
+Za @ index-CZfN4iXn.js:40
+k8 @ index-CZfN4iXn.js:40
+Za @ index-CZfN4iXn.js:40
+k8 @ index-CZfN4iXn.js:40
+Za @ index-CZfN4iXn.js:40
+k8 @ index-CZfN4iXn.js:40
+Za @ index-CZfN4iXn.js:40
+k8 @ index-CZfN4iXn.js:40
+Za @ index-CZfN4iXn.js:40
+k8 @ index-CZfN4iXn.js:40
+Za @ index-CZfN4iXn.js:40
+k8 @ index-CZfN4iXn.js:40
+Za @ index-CZfN4iXn.js:40
+k8 @ index-CZfN4iXn.js:40
+wk @ index-CZfN4iXn.js:40
+hc @ index-CZfN4iXn.js:40
+D3 @ index-CZfN4iXn.js:40
+Lu @ index-CZfN4iXn.js:38
+(anonymous) @ index-CZfN4iXn.js:40
