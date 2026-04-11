@@ -1,12 +1,3 @@
-2 moderate severity vulnerabilities
-To address all issues (including breaking changes), run:
-  npm audit fix --force
-Run `npm audit` for details.
-added 200 packages, and audited 201 packages in 9s
-46 packages are looking for funding
-  run `npm fund` for details
-4 moderate severity vulnerabilities
-To address all issues (including breaking changes), run:
   npm audit fix --force
 Run `npm audit` for details.
 vite v5.4.21 building for production...
@@ -20,22 +11,35 @@ dist/assets/purify.es-BgtpMKW3.js           22.77 kB │ gzip:   8.79 kB
 dist/assets/index.es-Ch0giBOl.js           150.69 kB │ gzip:  51.55 kB
 dist/assets/html2canvas.esm-CBrSDip1.js    201.42 kB │ gzip:  48.03 kB
 dist/assets/index-BC2IjL99.js            1,112.24 kB │ gzip: 340.53 kB
-✓ built in 4.67s
 (!) Some chunks are larger than 500 kB after minification. Consider:
 - Using dynamic import() to code-split the application
 - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
 - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 5.01s
 > server@1.0.0 build
 > tsc
-src/export/__tests__/PdfExporter.test.ts(8,9): error TS2741: Property 'doors' is missing in type '{ id: string; walls: { id: string; start: { x: number; y: number; }; end: { x: number; y: number; }; thickness: number; side: "north"; }[]; fixtures: never[]; pipes: never[]; dimensions: never[]; }' but required in type 'DrawingData'.
-src/export/__tests__/PdfExporter.test.ts(53,29): error TS2339: Property 'generateLegend' does not exist on type 'PdfExporter'.
-npm error Lifecycle script `build` failed with error:
+==> Uploading build...
+==> Uploaded in 3.7s. Compression took 48.4s
+==> Build successful 🎉
+==> Deploying...
+==> Setting WEB_CONCURRENCY=1 by default, based on available CPUs in the instance
+==> Running 'node server/dist/src/index.js'
+node:internal/modules/cjs/loader:1386
+  throw err;
+  ^
+Error: Cannot find module '/opt/render/project/src/server/dist/src/index.js'
+    at Function._resolveFilename (node:internal/modules/cjs/loader:1383:15)
+    at defaultResolveImpl (node:internal/modules/cjs/loader:1025:19)
+    at resolveForCJSWithHooks (node:internal/modules/cjs/loader:1030:22)
+    at Function._load (node:internal/modules/cjs/loader:1192:37)
+    at TracingChannel.traceSync (node:diagnostics_channel:328:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:237:24)
 Menu
-npm error code 2
-npm error path /opt/render/project/src/server
-npm error workspace server@1.0.0
-npm error location /opt/render/project/src/server
-npm error command failed
-npm error command sh -c tsc
-==> Build failed 😞
+    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:171:5)
+    at node:internal/main/run_main_module:36:49 {
+  code: 'MODULE_NOT_FOUND',
+  requireStack: []
+}
+Node.js v22.22.0
+==> Exited with status 1
 ==> Common ways to troubleshoot your deploy: https://render.com/docs/troubleshooting-deploys
