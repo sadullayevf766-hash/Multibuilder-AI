@@ -110,13 +110,25 @@ export class GeminiParser {
       }
     }
 
-    // Fallback: merge last assistant message context with new user message
+    // Fallback: merge last assistant context with new user message
     if (hasHistory) {
       const lastAssistant = [...history].reverse().find(m => m.role === 'assistant');
+      const lastUser = [...history].reverse().find(m => m.role === 'user');
       if (lastAssistant) {
-        // Build merged description: previous context + new instruction
-        const mergedDesc = `${lastAssistant.content}\n\nO'zgartirish: ${userMessage}`;
-        console.log('[MODE] Local parser with merged context');
+        // Try to extract fixture info from JSON context
+        let contextDesc = '';
+        try {
+          const ctx = JSON.parse(lastAssistant.content);
+          if (ctx.fixtures && Array.isArray(ctx.fixtures)) {
+            const fixtureList = ctx.fixtures.map((f: { type: string; wall?: string }) => f.type).join(', ');
+            contextDesc = `Xona: ${fixtureList} bor. `;
+          }
+        } catch {
+          contextDesc = lastAssistant.content + '\n';
+        }
+        const prevRequest = lastUser ? `Oldingi so'rov: ${lastUser.content}. ` : '';
+        const mergedDesc = `${contextDesc}${prevRequest}Yangi o'zgartirish: ${userMessage}`;
+        console.log('[MODE] Local parser with merged context:', mergedDesc.slice(0, 100));
         return this.smartLocalParse(mergedDesc);
       }
     }

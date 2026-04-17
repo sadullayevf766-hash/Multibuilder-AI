@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import { join } from 'path';
 import { GeminiParser } from './ai/GeminiParser';
 import { FloorPlanEngine } from './engine/FloorPlanEngine';
+import { PlumbingEngine } from './engine/PlumbingEngine';
 import { exportToDxf } from './export/DxfExporter';
 import { PdfExporter } from './export/PdfExporter';
 import { saveProject, getProjectHistory, getProject, renameProject, softDeleteProject, restoreProject, hardDeleteProject, getTrash, updateProjectDrawing } from './db/supabase';
@@ -30,6 +31,7 @@ const geminiParser = new GeminiParser(
   process.env.GROQ_API_KEY || ''
 );
 const floorPlanEngine = new FloorPlanEngine();
+const plumbingEngine = new PlumbingEngine();
 const pdfExporter = new PdfExporter();
 
 app.get('/api/health', (req, res) => {
@@ -38,13 +40,25 @@ app.get('/api/health', (req, res) => {
 
 app.post('/api/generate', async (req, res) => {
   try {
-    const { description } = req.body;
+    const { description, drawingType, floorCount } = req.body;
 
     if (!description) {
       return res.status(400).json({ error: 'Description is required' });
     }
 
-    // Step 1: Parse natural language to RoomSpec or FloorPlan
+    // Plumbing axonometric schema
+    if (drawingType === 'plumbing-axonometric') {
+      const schema = plumbingEngine.generate(description);
+      const drawingData = {
+        id: schema.id,
+        walls: [], fixtures: [], pipes: [], dimensions: [], doors: [],
+        drawingType: 'plumbing-axonometric' as const,
+        plumbingSchema: schema,
+      };
+      return res.json({ drawingData });
+    }
+
+    // Default: floor plan
     const parsed = await geminiParser.parseDescription(description);
 
     // Step 2: Generate drawing data
@@ -227,15 +241,24 @@ app.delete('/api/project/:id/permanent', async (req, res) => {
 app.patch('/api/project/:id/drawing', async (req, res) => {
   try {
     const { id } = req.params;
-    const { userMessage, history } = req.body;
+    const { userMessage, history, currentDrawingData } = req.body;
     const authHeader = req.headers.authorization;
 
     if (!userMessage) return res.status(400).json({ error: 'userMessage is required' });
 
-    // 1. Parse with conversation history
-    const parsed = await geminiParser.parseWithHistory(userMessage, history || []);
+    // 1. Build enriched message that includes current state context
+    let enrichedMessage = userMessage;
+    if (currentDrawingData && currentDrawingData.fixtures?.length > 0) {
+      const existingFixtures = currentDrawingData.fixtures.map((f: { type: string; wall: string }) => `${f.type} (${f.wall})`).join(', ');
+      const wallCount = currentDrawingData.walls?.length ?? 4;
+      // Tell AI what already exists so it preserves it
+      enrichedMessage = `Xonada hozir bor: ${existingFixtures}. Devorlar: ${wallCount}. Foydalanuvchi so'rovi: ${userMessage}. MUHIM: Mavjud narsalarni saqla, faqat so'ralgan o'zgarishni qil.`;
+    }
 
-    // 2. Generate drawing
+    // 2. Parse with conversation history (enriched message)
+    const parsed = await geminiParser.parseWithHistory(enrichedMessage, history || []);
+
+    // 3. Generate drawing
     let drawingData;
     if ('rooms' in parsed) {
       drawingData = floorPlanEngine.generateFloorPlan(parsed);
@@ -243,14 +266,41 @@ app.patch('/api/project/:id/drawing', async (req, res) => {
       drawingData = floorPlanEngine.generateDrawing(parsed);
     }
 
-    // 3. Build updated messages array
+    // 4. Merge: if current drawing exists and new drawing has fewer fixtures, keep old ones
+    if (currentDrawingData && currentDrawingData.fixtures?.length > 0 && drawingData.fixtures.length < currentDrawingData.fixtures.length) {
+      // AI removed fixtures — check if user explicitly asked to remove
+      const removeKeywords = ['o\'chir', 'olib tashla', 'yo\'q qil', 'remove', 'delete', 'o\'rniga'];
+      const userWantsRemoval = removeKeywords.some(kw => userMessage.toLowerCase().includes(kw));
+      if (!userWantsRemoval) {
+        // Preserve existing fixtures, add new ones from AI response
+        const existingTypes = new Set(currentDrawingData.fixtures.map((f: { type: string }) => f.type));
+        const newFixtures = drawingData.fixtures.filter((f: { type: string }) => !existingTypes.has(f.type));
+        drawingData = {
+          ...drawingData,
+          fixtures: [...currentDrawingData.fixtures, ...newFixtures],
+          walls: currentDrawingData.walls, // keep original walls
+          pipes: drawingData.pipes,
+          doors: currentDrawingData.doors ?? drawingData.doors,
+          windows: currentDrawingData.windows ?? drawingData.windows,
+        };
+      }
+    }
+
+    // 5. Build updated messages
+    const assistantContext = JSON.stringify({
+      type: 'rooms' in parsed ? 'floorplan' : 'room',
+      fixtures: drawingData.fixtures.map((f: { type: string; wall: string }) => ({ type: f.type, wall: f.wall })),
+      walls: drawingData.walls.length,
+      doors: drawingData.doors?.length ?? 0,
+    });
+
     const updatedMessages = [
       ...(history || []),
       { role: 'user', content: userMessage },
-      { role: 'assistant', content: userMessage } // store user prompt as context marker
+      { role: 'assistant', content: assistantContext }
     ];
 
-    // 4. Save to DB
+    // 6. Save to DB
     const project = await updateProjectDrawing(id, drawingData, updatedMessages, authHeader);
     res.json({ ...project, drawingData });
   } catch (error) {

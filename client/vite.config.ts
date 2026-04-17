@@ -7,6 +7,9 @@ export default defineConfig({
   build: {
     outDir: 'dist',
   },
+  optimizeDeps: {
+    include: ['three'],
+  },
   server: {
     port: 3000,
     proxy: {

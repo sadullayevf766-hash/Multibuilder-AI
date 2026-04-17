@@ -9,12 +9,14 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.39.0",
+    "@types/three": "^0.183.1",
     "jspdf": "^4.2.1",
     "konva": "^9.3.14",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-konva": "^18.2.10",
-    "react-router-dom": "^6.21.1"
+    "react-router-dom": "^6.21.1",
+    "three": "^0.183.2"
   },
   "devDependencies": {
     "@types/react": "^18.2.47",

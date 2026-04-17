@@ -76,6 +76,33 @@ export interface DimensionLine {
   label: string;
 }
 
+export type DrawingType = 'floor-plan' | 'plumbing-axonometric';
+
+export type PlumbingFixtureType = 'sink' | 'toilet' | 'bathtub' | 'shower' | 'washing_machine';
+
+export interface PlumbingFixture {
+  id: string;
+  type: PlumbingFixtureType;
+  floor: number;
+  position: Point;
+}
+
+export interface PlumbingPipe {
+  id: string;
+  type: PipeType;
+  path: Point[];
+  diameter: number;
+  label: string;
+}
+
+export interface PlumbingSchema {
+  id: string;
+  floorCount: number;
+  fixtures: PlumbingFixture[];
+  pipes: PlumbingPipe[];
+  risers: PlumbingPipe[];
+}
+
 export interface DrawingData {
   id: string;
   walls: Wall[];
@@ -84,6 +111,8 @@ export interface DrawingData {
   dimensions: DimensionLine[];
   doors: DoorSpec[];
   windows?: WindowSpec[];
+  drawingType?: DrawingType;
+  plumbingSchema?: PlumbingSchema;
 }
 
 export interface RoomConnection {

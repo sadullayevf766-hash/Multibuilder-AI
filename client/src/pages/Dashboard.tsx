@@ -179,7 +179,7 @@ export default function Dashboard() {
             {!loading && projects.length > 0 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {projects.map(project => (
-                  <div key={project.id} className="liquid-glass border border-white/10 rounded-2xl p-5 hover:border-white/25 transition-all group">
+                  <div key={project.id} className="liquid-glass border border-white/10 rounded-2xl p-5 hover:border-white/25 transition-all group relative">
                     {renameId === project.id ? (
                       <div className="mb-3">
                         <input autoFocus value={renameName}
@@ -199,19 +199,21 @@ export default function Dashboard() {
                         </div>
                       </div>
                     ) : (
-                      <Link to={`/project/${project.id}`}>
-                        <h3 className="font-medium text-white mb-1 hover:text-gray-300 transition-colors line-clamp-1">{project.name}</h3>
-                      </Link>
+                      <>
+                        {/* Full card clickable overlay */}
+                        <Link to={`/project/${project.id}`} className="absolute inset-0 rounded-2xl z-0" aria-label={project.name} />
+                        <h3 className="font-medium text-white mb-1 line-clamp-1 relative z-10">{project.name}</h3>
+                      </>
                     )}
-                    <p className="text-xs text-gray-500 mb-4">
+                    <p className="text-xs text-gray-500 mb-4 relative z-10">
                       {new Date(project.created_at).toLocaleDateString('uz-UZ', { year: 'numeric', month: 'short', day: 'numeric' })}
                     </p>
-                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button onClick={() => { setRenameId(project.id); setRenameName(project.name); }}
+                    <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity relative z-10">
+                      <button onClick={e => { e.preventDefault(); setRenameId(project.id); setRenameName(project.name); }}
                         className="flex-1 py-1.5 text-xs bg-white/5 text-gray-300 rounded-lg hover:bg-white/10 transition-colors border border-white/10">
                         ✏️ Tahrirlash
                       </button>
-                      <button onClick={() => handleTrash(project.id)} disabled={actionLoading === project.id}
+                      <button onClick={e => { e.preventDefault(); handleTrash(project.id); }} disabled={actionLoading === project.id}
                         className="flex-1 py-1.5 text-xs bg-red-500/10 text-red-400 rounded-lg hover:bg-red-500/20 transition-colors border border-red-500/20 disabled:opacity-50">
                         {actionLoading === project.id ? '...' : "🗑️ O'chirish"}
                       </button>

@@ -1,6 +1,9 @@
 ﻿import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Canvas2D, { type Canvas2DHandle } from '../components/Canvas2D';
+import Canvas3D, { type Canvas3DHandle } from '../components/Canvas3D';
+import AxonometricCanvas, { type AxonometricCanvasHandle } from '../components/AxonometricCanvas';
+import PlumbingCanvas3D, { type PlumbingCanvas3DHandle } from '../components/PlumbingCanvas3D';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 import type { DrawingData } from '../../../shared/types';
@@ -31,16 +34,28 @@ const EXAMPLES = [
   '5x4 oshxona\n4x3 hammom\n4x5 yotoqxona',
 ];
 
+const PLUMBING_EXAMPLES = [
+  '2 qavatli bino, har qavatda lavabo, unitaz, dush',
+  '3 qavatli uy, 1-qavatda lavabo va unitaz, 2-qavatda vanna va unitaz, 3-qavatda dush va lavabo',
+  '1 qavat, lavabo, unitaz, vanna, kir yuvish mashinasi',
+  '4 qavatli bino, har qavatda lavabo, unitaz, dush',
+];
+
 export default function Generator() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const canvasRef = useRef<Canvas2DHandle>(null);
+  const canvas3dRef = useRef<Canvas3DHandle>(null);
+  const axoRef = useRef<AxonometricCanvasHandle>(null);
+  const plumbing3dRef = useRef<PlumbingCanvas3DHandle>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [description, setDescription] = useState('');
   const [loadingState, setLoadingState] = useState<LoadingState>('idle');
   const [drawingData, setDrawingData] = useState<DrawingData | null>(null);
   const [error, setError] = useState('');
   const [canvasWidth, setCanvasWidth] = useState(900);
+  const [viewMode, setViewMode] = useState<'2d' | '3d'>('2d');
+  const [drawingType, setDrawingType] = useState<'floor-plan' | 'plumbing-axonometric'>('floor-plan');
   // Auto-save name dialog
   const [showNameDialog, setShowNameDialog] = useState(false);
   const [projectName, setProjectName] = useState('');
@@ -67,7 +82,7 @@ export default function Generator() {
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description })
+        body: JSON.stringify({ description, drawingType })
       });
       if (!response.ok) throw new Error('Chizma yaratishda xatolik yuz berdi');
       const data = await response.json();
@@ -151,12 +166,25 @@ export default function Generator() {
           {/* Input panel */}
           <div className="lg:col-span-2 space-y-4">
             <div className="liquid-glass border border-white/10 rounded-2xl p-5">
+              <label className="block text-sm text-gray-300 mb-2">Chizma turi</label>
+              <div className="flex gap-2 mb-4">
+                <button onClick={() => setDrawingType('floor-plan')}
+                  className={`flex-1 py-2 rounded-xl text-xs font-medium transition-colors ${drawingType === 'floor-plan' ? 'bg-white text-black' : 'bg-white/10 text-gray-300 hover:bg-white/20'}`}>
+                  📐 Arxitektura rejasi
+                </button>
+                <button onClick={() => setDrawingType('plumbing-axonometric')}
+                  className={`flex-1 py-2 rounded-xl text-xs font-medium transition-colors ${drawingType === 'plumbing-axonometric' ? 'bg-white text-black' : 'bg-white/10 text-gray-300 hover:bg-white/20'}`}>
+                  🔧 Suv ta'minoti sxemasi
+                </button>
+              </div>
               <label className="block text-sm text-gray-300 mb-2">Xona tavsifi</label>
               <textarea
                 value={description}
                 onChange={e => setDescription(e.target.value)}
                 onKeyDown={e => { if (e.key === 'Enter' && e.ctrlKey) handleGenerate(); }}
-                placeholder="Masalan: 3x4 metr hammom, shimolda lavabo, janubda eshik..."
+                placeholder={drawingType === 'plumbing-axonometric'
+                  ? 'Masalan: 2 qavatli bino, har qavatda lavabo, unitaz, dush...'
+                  : 'Masalan: 3x4 metr hammom, shimolda lavabo, janubda eshik...'}
                 className="glass-input w-full h-36 px-4 py-3 rounded-xl text-sm resize-none"
                 disabled={isLoading}
               />
@@ -178,7 +206,7 @@ export default function Generator() {
             <div className="liquid-glass border border-white/10 rounded-2xl p-5">
               <p className="text-xs text-gray-500 uppercase tracking-widest mb-3">Misollar</p>
               <div className="space-y-2">
-                {EXAMPLES.map((ex, i) => (
+                {(drawingType === 'plumbing-axonometric' ? PLUMBING_EXAMPLES : EXAMPLES).map((ex, i) => (
                   <button key={i} onClick={() => setDescription(ex)}
                     className="w-full text-left text-xs text-gray-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-lg px-3 py-2 transition-colors font-mono whitespace-pre-line">
                     {ex}
@@ -219,7 +247,16 @@ export default function Generator() {
             {loadingState === 'ready' && drawingData && (
               <div className="liquid-glass border border-white/10 rounded-2xl overflow-hidden">
                 <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-                  <span className="text-sm text-gray-400">Chizma tayyor</span>
+                  <div className="flex gap-2">
+                    <button onClick={() => setViewMode('2d')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${viewMode === '2d' ? 'bg-white text-black' : 'bg-white/10 text-gray-300 hover:bg-white/20'}`}>
+                      {drawingData.drawingType === 'plumbing-axonometric' ? '📐 Sxema' : '2D Reja'}
+                    </button>
+                    <button onClick={() => setViewMode('3d')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${viewMode === '3d' ? 'bg-white text-black' : 'bg-white/10 text-gray-300 hover:bg-white/20'}`}>
+                      3D Ko'rinish
+                    </button>
+                  </div>
                   <div className="flex flex-wrap gap-2">
                     <button onClick={() => { setPendingDrawing(drawingData); setShowNameDialog(true); }}
                       className="px-3 py-1.5 bg-white text-black rounded-lg text-xs font-medium hover:bg-gray-100 transition-colors">
@@ -236,7 +273,17 @@ export default function Generator() {
                   </div>
                 </div>
                 <div ref={containerRef} className="overflow-x-auto bg-white w-full">
-                  <Canvas2D ref={canvasRef} drawingData={drawingData} width={canvasWidth} scale={1} />
+                  {drawingData.drawingType === 'plumbing-axonometric' && drawingData.plumbingSchema ? (
+                    viewMode === '3d' ? (
+                      <PlumbingCanvas3D ref={plumbing3dRef} schema={drawingData.plumbingSchema} width={canvasWidth} />
+                    ) : (
+                      <AxonometricCanvas ref={axoRef} schema={drawingData.plumbingSchema} width={canvasWidth} />
+                    )
+                  ) : viewMode === '2d' ? (
+                    <Canvas2D ref={canvasRef} drawingData={drawingData} width={canvasWidth} scale={1} />
+                  ) : (
+                    <Canvas3D ref={canvas3dRef} drawingData={drawingData} width={canvasWidth} />
+                  )}
                 </div>
               </div>
             )}

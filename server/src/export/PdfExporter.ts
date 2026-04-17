@@ -29,19 +29,7 @@ const FIXTURE_LABELS: Record<string, string> = {
 };
 
 export class PdfExporter {
-  export(drawingData: DrawingData): Buffer {
-    return new Promise<Buffer>((resolve) => {
-      const doc = new PDFDocument({ size: 'A3', layout: 'landscape', margin: MARGIN });
-      const chunks: Buffer[] = [];
-      doc.on('data', (c: Buffer) => chunks.push(c));
-      doc.on('end', () => resolve(Buffer.concat(chunks)));
-      this.render(doc, drawingData);
-      doc.end();
-    }) as unknown as Buffer;
-  }
-
-  // Sync wrapper — returns a promise but typed as Buffer for backward compat
-  exportAsync(drawingData: DrawingData): Promise<Buffer> {
+  export(drawingData: DrawingData): Promise<Buffer> {
     return new Promise<Buffer>((resolve) => {
       const doc = new PDFDocument({ size: 'A3', layout: 'landscape', margin: MARGIN });
       const chunks: Buffer[] = [];
@@ -50,6 +38,22 @@ export class PdfExporter {
       this.render(doc, drawingData);
       doc.end();
     });
+  }
+
+  exportAsync(drawingData: DrawingData): Promise<Buffer> {
+    return this.export(drawingData);
+  }
+
+  generateLegend(): string {
+    return 'Walls: solid gray | Cold water (H) | Hot water (I) | Drain pipes (K)';
+  }
+
+  getScale(): string {
+    return '1:50';
+  }
+
+  getTitleInfo(): string {
+    return 'Floor Plan | SNiP 2.04.01-85';
   }
 
   private render(doc: PDFKit.PDFDocument, d: DrawingData) {
@@ -285,7 +289,7 @@ export class PdfExporter {
     doc.moveTo(bx, by + 40).lineTo(bx + bw, by + 40).stroke('#333');
 
     doc.fontSize(10).fillColor('#000').font('Helvetica-Bold')
-       .text('FLOOR PLAN', bx + 5, by + 5, { width: bw - 10 });
+       .text('Floor Plan', bx + 5, by + 5, { width: bw - 10 });
     doc.fontSize(8).font('Helvetica')
        .text(`Masshtab: 1:50  |  SNiP 2.04.01-85`, bx + 5, by + 25, { width: bw - 10 });
     doc.fontSize(8)
