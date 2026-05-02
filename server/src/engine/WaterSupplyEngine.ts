@@ -175,6 +175,7 @@ export function parseWaterRooms(description: string): WaterRoomInput[] {
   // Floor split
   const floorSections = splitByFloors(description);
 
+
   for (const { floorNum, text } of floorSections) {
     // Parse room lines: "mehmonxona 25m²", "hammom 8m²", "bathroom 12m2"
     const roomRx = /([a-zA-ZА-Яа-яЎўҚқҒғҲҳ\s''-]+?)\s+(\d+(?:[.,]\d+)?)\s*(?:m[²2²]?|м[²2]?|кв\.?м|sq\.?m)/gi;
@@ -205,11 +206,33 @@ export function parseWaterRooms(description: string): WaterRoomInput[] {
 
   // Deduplicate by name+floor
   const seen = new Set<string>();
-  return rooms.filter(r => {
+  const deduped = rooms.filter(r => {
     const key = `${r.floor}-${r.name.toLowerCase()}-${r.area}`;
     if (seen.has(key)) return false;
     seen.add(key); return true;
   });
+
+  // Fallback: if no rooms parsed (no area numbers), detect rooms by keyword
+  if (deduped.length === 0) {
+    const d = description.toLowerCase();
+    // Count bathroom/kitchen mentions
+    const bathCount = (d.match(/hammom|vanna|санузел|ванная|туалет|bathroom|wc|bath/g) || []).length;
+    const kitchCount = (d.match(/oshxona|kitchen|кухня|кухн/g) || []).length;
+    const floorMatch = d.match(/(\d+)\s*(?:qavat|этаж|floor|stor)/);
+    const floorCount = floorMatch ? Math.max(1, Math.min(parseInt(floorMatch[1]), 30)) : 1;
+
+    for (let f = 1; f <= floorCount; f++) {
+      if (kitchCount > 0) deduped.push({ name: 'Oshxona', area: 15, floor: f });
+      if (bathCount > 0)  deduped.push({ name: 'Hammom', area: 6, floor: f });
+      // Always add at least one wet room per floor
+      if (kitchCount === 0 && bathCount === 0) {
+        deduped.push({ name: 'Hammom', area: 6, floor: f });
+        deduped.push({ name: 'Oshxona', area: 12, floor: f });
+      }
+    }
+  }
+
+  return deduped;
 }
 
 interface FloorSection { floorNum: number; text: string }
