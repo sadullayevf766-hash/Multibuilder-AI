@@ -4,7 +4,17 @@ import dotenv from 'dotenv';
 import { join } from 'path';
 import { GeminiParser } from './ai/GeminiParser';
 import { FloorPlanEngine } from './engine/FloorPlanEngine';
+import { WarmFloorEngine, parseWarmFloorRooms } from './engine/WarmFloorEngine';
+import { WaterSupplyEngine, parseWaterRooms } from './engine/WaterSupplyEngine';
+import { SewageEngine, parseSewageRooms } from './engine/SewageEngine';
+import { StormDrainEngine, parseStormRooms } from './engine/StormDrainEngine';
+import { BoilerRoomEngine } from './engine/BoilerRoomEngine';
+import { MegaPlannerParser, buildDescription } from './ai/MegaPlannerParser';
+import { FacadeEngine, parseFacadeInput } from './engine/FacadeEngine';
 import { PlumbingEngine } from './engine/PlumbingEngine';
+import { ElectricalEngine } from './engine/ElectricalEngine';
+import { ArchitectureEngine } from './engine/ArchitectureEngine';
+import { DecorEngine } from './engine/DecorEngine';
 import { exportToDxf } from './export/DxfExporter';
 import { PdfExporter } from './export/PdfExporter';
 import { saveProject, getProjectHistory, getProject, renameProject, softDeleteProject, restoreProject, hardDeleteProject, getTrash, updateProjectDrawing } from './db/supabase';
@@ -26,12 +36,23 @@ if (process.env.NODE_ENV === 'production') {
   app.use(express.static(clientDist));
 }
 
+const warmFloorEngine   = new WarmFloorEngine();
+const waterSupplyEngine = new WaterSupplyEngine();
+const sewageEngine      = new SewageEngine();
+const stormDrainEngine  = new StormDrainEngine();
+const boilerRoomEngine  = new BoilerRoomEngine();
+const megaPlanner       = new MegaPlannerParser(process.env.GEMINI_API_KEY || '');
+const facadeEngine      = new FacadeEngine();
+
 const geminiParser = new GeminiParser(
   process.env.GEMINI_API_KEY || '',
   process.env.GROQ_API_KEY || ''
 );
 const floorPlanEngine = new FloorPlanEngine();
 const plumbingEngine = new PlumbingEngine();
+const electricalEngine = new ElectricalEngine();
+const architectureEngine = new ArchitectureEngine();
+const decorEngine = new DecorEngine();
 const pdfExporter = new PdfExporter();
 
 app.get('/api/health', (req, res) => {
@@ -58,6 +79,24 @@ app.post('/api/generate', async (req, res) => {
       return res.json({ drawingData });
     }
 
+    // Architecture drawing — parse with Gemini then run ArchitectureEngine
+    if (drawingType === 'architecture') {
+      const parsed = await geminiParser.parseDescription(description);
+      const archData = 'rooms' in parsed
+        ? architectureEngine.generateFromFloorPlan(parsed)
+        : architectureEngine.generateFromRoom(parsed);
+      return res.json({ archData });
+    }
+
+    // Electrical floor plan — parse with Gemini then run ElectricalEngine
+    if (drawingType === 'electrical-floor-plan') {
+      const parsed = await geminiParser.parseDescription(description);
+      const electricalData = 'rooms' in parsed
+        ? electricalEngine.generateFromFloorPlan(parsed)
+        : electricalEngine.generateFromRoom(parsed);
+      return res.json({ electricalData });
+    }
+
     // Default: floor plan
     const parsed = await geminiParser.parseDescription(description);
 
@@ -77,6 +116,211 @@ app.post('/api/generate', async (req, res) => {
     res.status(500).json({ 
       error: 'Failed to generate floor plan',
       message: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+// ── Super Drawing: Issiq pol isitish tizimi ───────────────────────────────────
+app.post('/api/generate-warm-floor', async (req, res) => {
+  try {
+    const { description } = req.body;
+    console.log('[WARM-FLOOR] description:', (description || '').slice(0, 80));
+
+    const rooms  = parseWarmFloorRooms(description || '');
+    const schema = warmFloorEngine.generate(rooms);
+
+    console.log(`[WARM-FLOOR] ${schema.floors.length} qavat, ${rooms.length} xona, ${schema.totalHeatW} W`);
+    return res.json({ schema });
+  } catch (err) {
+    console.error('[WARM-FLOOR] Error:', err);
+    res.status(500).json({ error: 'Issiq pol sxemasini yaratishda xatolik', message: (err as Error).message });
+  }
+});
+
+// ── Suv ta'minoti sxemasi ─────────────────────────────────────────────────────
+app.post('/api/generate-water-supply', async (req, res) => {
+  try {
+    const { description } = req.body;
+    console.log('[WATER-SUPPLY] description:', (description || '').slice(0, 80));
+    const rooms  = parseWaterRooms(description || '');
+    const schema = waterSupplyEngine.generate(rooms);
+    console.log(`[WATER-SUPPLY] ${schema.floors.length} qavat, ${schema.totalFixtures} jihoz, ${schema.totalRisers} stoyak`);
+    return res.json({ schema });
+  } catch (err) {
+    console.error('[WATER-SUPPLY] Error:', err);
+    res.status(500).json({ error: 'Suv ta\'minoti sxemasini yaratishda xatolik', message: (err as Error).message });
+  }
+});
+
+// ── Kanalizatsiya sxemasi ─────────────────────────────────────────────────────
+app.post('/api/generate-sewage', async (req, res) => {
+  try {
+    const { description } = req.body;
+    console.log('[SEWAGE] description:', (description || '').slice(0, 80));
+    const rooms  = parseSewageRooms(description || '');
+    const schema = sewageEngine.generate(rooms);
+    console.log(`[SEWAGE] ${schema.floors.length} qavat, ${schema.totalFixtures} jihoz, ${schema.totalRisers} stoyak`);
+    return res.json({ schema });
+  } catch (err) {
+    console.error('[SEWAGE] Error:', err);
+    res.status(500).json({ error: 'Kanalizatsiya sxemasini yaratishda xatolik', message: (err as Error).message });
+  }
+});
+
+// ── Ливнёвка (yomg'ir suvi kanalizatsiyasi) ──────────────────────────────────
+app.post('/api/generate-storm-drain', async (req, res) => {
+  try {
+    const { description } = req.body;
+    console.log('[STORM-DRAIN] description:', (description || '').slice(0, 80));
+    const rooms  = parseStormRooms(description || '');
+    const schema = stormDrainEngine.generate(rooms);
+    console.log(`[STORM-DRAIN] ${schema.floors.length} qavat, ${schema.totalTraps} trap, ${schema.totalFlowLps} l/s`);
+    return res.json({ schema });
+  } catch (err) {
+    console.error('[STORM-DRAIN] Error:', err);
+    res.status(500).json({ error: 'Ливнёвка sxemasini yaratishda xatolik', message: (err as Error).message });
+  }
+});
+
+// ── Qozonxona (Котельная) ────────────────────────────────────────────────────
+app.post('/api/generate-boiler-room', async (req, res) => {
+  try {
+    const { description } = req.body;
+    console.log('[BOILER-ROOM] description:', (description || '').slice(0, 80));
+
+    // Parse from description
+    const floorsMatch = description?.match(/(\d+)\s*(?:qavat|этаж|floor)/i);
+    const areaMatch   = description?.match(/(\d+(?:[.,]\d+)?)\s*m[²2]?/i);
+    const floors      = floorsMatch ? parseInt(floorsMatch[1]) : 3;
+    const totalAreaM2 = areaMatch   ? parseFloat(areaMatch[1].replace(',', '.')) : floors * 120;
+    const hasWarmFloor = /issiq pol|теплый пол|warm.?floor/i.test(description || '');
+    const hasWarmWall  = /issiq devor|теплые стены|warm.?wall/i.test(description || '');
+    const hasHvs       = !/no.?hvs|без.?гвс/i.test(description || '');
+
+    const schema = boilerRoomEngine.generate({ floors, totalAreaM2, hasWarmFloor, hasWarmWall, hasHvs });
+    console.log(`[BOILER-ROOM] ${schema.heatPumpCount}x nasosi, ${schema.totalHeatKw} kW, ${schema.equipment.length} jihoz`);
+    return res.json({ schema });
+  } catch (err) {
+    console.error('[BOILER-ROOM] Error:', err);
+    res.status(500).json({ error: 'Qozonxona sxemasini yaratishda xatolik', message: (err as Error).message });
+  }
+});
+
+// ── Mega Builder: Plan Stage chat ────────────────────────────────────────────
+app.post('/api/mega/chat', async (req, res) => {
+  try {
+    const { history = [], message } = req.body;
+    if (!message) return res.status(400).json({ error: 'message required' });
+    console.log('[MEGA/CHAT] message:', message.slice(0, 60));
+    const result = await megaPlanner.chat(history, message);
+    return res.json(result);
+  } catch (err) {
+    console.error('[MEGA/CHAT] Error:', err);
+    res.status(500).json({ error: 'Mega chat xatolik', message: (err as Error).message });
+  }
+});
+
+// ── Mega Builder: Build all disciplines ───────────────────────────────────────
+app.post('/api/mega/build', async (req, res) => {
+  try {
+    const { spec } = req.body;
+    if (!spec) return res.status(400).json({ error: 'spec required' });
+
+    console.log(`[MEGA/BUILD] ${spec.disciplines?.length} soha, ${spec.floorCount} qavat`);
+
+    const results: Record<string, unknown> = {};
+
+    for (const disc of (spec.disciplines as string[])) {
+      try {
+        const desc = buildDescription(spec, disc as Parameters<typeof buildDescription>[1]);
+
+        if (disc === 'warm-floor') {
+          const { parseWarmFloorRooms, WarmFloorEngine } = await import('./engine/WarmFloorEngine');
+          const rooms  = parseWarmFloorRooms(desc);
+          results[disc] = new WarmFloorEngine().generate(rooms);
+        } else if (disc === 'water-supply') {
+          const { parseWaterRooms, WaterSupplyEngine } = await import('./engine/WaterSupplyEngine');
+          const rooms  = parseWaterRooms(desc);
+          results[disc] = new WaterSupplyEngine().generate(rooms);
+        } else if (disc === 'sewage') {
+          const { parseSewageRooms, SewageEngine } = await import('./engine/SewageEngine');
+          const rooms  = parseSewageRooms(desc);
+          results[disc] = new SewageEngine().generate(rooms);
+        } else if (disc === 'storm-drain') {
+          const { parseStormRooms, StormDrainEngine } = await import('./engine/StormDrainEngine');
+          const rooms  = parseStormRooms(desc);
+          results[disc] = new StormDrainEngine().generate(rooms);
+        } else if (disc === 'boiler-room') {
+          const floors      = spec.floorCount ?? 1;
+          const totalAreaM2 = spec.totalAreaM2 ?? 200;
+          results[disc] = boilerRoomEngine.generate({
+            floors, totalAreaM2,
+            hasWarmFloor: spec.hasWarmFloor ?? false,
+            hasWarmWall:  spec.hasWarmWall  ?? false,
+            hasHvs:       spec.hasHvs       ?? true,
+          });
+        } else if (disc === 'facade') {
+          const facInput = parseFacadeInput(desc);
+          results[disc] = facadeEngine.generate(facInput);
+        } else if (disc === 'floor-plan' || disc === 'electrical' || disc === 'architecture' || disc === 'plumbing' || disc === 'decor') {
+          // GeminiParser + FloorPlanEngine
+          const parsed = await geminiParser.parseDescription(desc);
+          results[disc] = floorPlanEngine.generateDrawing(parsed as Parameters<typeof floorPlanEngine.generateDrawing>[0]);
+        }
+      } catch (e) {
+        console.error(`[MEGA/BUILD] ${disc} xatolik:`, (e as Error).message);
+        results[disc] = null;
+      }
+    }
+
+    return res.json({ results });
+  } catch (err) {
+    console.error('[MEGA/BUILD] Error:', err);
+    res.status(500).json({ error: 'Mega build xatolik', message: (err as Error).message });
+  }
+});
+
+// ── Mega Builder: Edit request ────────────────────────────────────────────────
+app.post('/api/mega/edit', async (req, res) => {
+  try {
+    const { editHistory = [], message, spec } = req.body;
+    if (!message || !spec) return res.status(400).json({ error: 'message and spec required' });
+    console.log('[MEGA/EDIT] message:', message.slice(0, 60));
+    const result = await megaPlanner.classifyEdit(editHistory, message, spec);
+    return res.json(result);
+  } catch (err) {
+    console.error('[MEGA/EDIT] Error:', err);
+    res.status(500).json({ error: 'Mega edit xatolik', message: (err as Error).message });
+  }
+});
+
+// ── Multi-floor Building generation ──────────────────────────────────────────
+app.post('/api/generate-building', async (req, res) => {
+  try {
+    const { description } = req.body;
+    if (!description) return res.status(400).json({ error: 'Description required' });
+
+    console.log('[BUILDING] Parsing:', description.slice(0, 80));
+
+    // Parse → Building
+    const building = await geminiParser.parseBuilding(description);
+    console.log(`[BUILDING] ${building.floors.length} qavat, jami xonalar:`,
+      building.floors.reduce((s, f) => s + f.rooms.length, 0));
+
+    // Generate DrawingData per floor
+    const floorDrawings = floorPlanEngine.generateBuilding(building);
+
+    return res.json({
+      building,
+      floorDrawings,           // DrawingData[] — biri har qavat uchun
+      floorCount: building.floors.length,
+      footprint:  building.footprint,
+    });
+  } catch (err) {
+    console.error('[BUILDING] Error:', err);
+    res.status(500).json({
+      error: 'Failed to generate building',
+      message: err instanceof Error ? err.message : 'Unknown error',
     });
   }
 });
@@ -309,6 +553,64 @@ app.patch('/api/project/:id/drawing', async (req, res) => {
   }
 });
 
+// Interior design / decor generation
+app.post('/api/generate-decor', (req, res) => {
+  try {
+    const { description } = req.body;
+    if (!description) return res.status(400).json({ error: 'description required' });
+    const decorSchema = decorEngine.generate(description);
+    return res.json({ decorSchema });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to generate decor', message: error instanceof Error ? error.message : 'Unknown' });
+  }
+});
+
+// Direct architecture generation (no Gemini — accepts roomSpec or floorPlan directly)
+app.post('/api/generate-architecture', (req, res) => {
+  try {
+    const { roomSpec, floorPlan } = req.body;
+    if (floorPlan) return res.json({ archData: architectureEngine.generateFromFloorPlan(floorPlan) });
+    if (roomSpec)  return res.json({ archData: architectureEngine.generateFromRoom(roomSpec) });
+    return res.status(400).json({ error: 'roomSpec or floorPlan required' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to generate architecture drawing', message: error instanceof Error ? error.message : 'Unknown' });
+  }
+});
+
+// Direct electrical generation (no Gemini — accepts roomSpec or floorPlan directly)
+app.post('/api/generate-electrical', (req, res) => {
+  try {
+    const { roomSpec, floorPlan } = req.body;
+    if (floorPlan) {
+      return res.json({ electricalData: electricalEngine.generateFromFloorPlan(floorPlan) });
+    }
+    if (roomSpec) {
+      return res.json({ electricalData: electricalEngine.generateFromRoom(roomSpec) });
+    }
+    return res.status(400).json({ error: 'roomSpec or floorPlan required' });
+  } catch (error) {
+    console.error('Electrical generation error:', error);
+    res.status(500).json({ error: 'Failed to generate electrical drawing', message: error instanceof Error ? error.message : 'Unknown' });
+  }
+});
+
+// ── Facade generation ─────────────────────────────────────────────────────────
+app.post('/api/generate-facade', async (req, res) => {
+  try {
+    const { description } = req.body;
+    if (!description) return res.status(400).json({ error: 'description required' });
+
+    console.log('[FACADE] Parsing:', description.slice(0, 80));
+    const input  = parseFacadeInput(description);
+    const schema = facadeEngine.generate(input);
+    console.log(`[FACADE] ${schema.style} uslub, ${schema.floorCount} qavat, ${schema.elevations.length} fasad`);
+    return res.json({ schema });
+  } catch (err) {
+    console.error('[FACADE] Error:', err);
+    res.status(500).json({ error: 'Fasad generatsiya xatolik', message: (err as Error).message });
+  }
+});
+
 // SPA fallback — serve index.html for all non-API routes in production
 if (process.env.NODE_ENV === 'production') {
   const clientDist = join(process.cwd(), 'client', 'dist');
@@ -320,3 +622,4 @@ if (process.env.NODE_ENV === 'production') {
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
+

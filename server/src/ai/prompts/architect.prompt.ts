@@ -125,12 +125,12 @@ For SINGLE ROOM:
       "reason": "why placed here"
     }
   ],
-  "doors": [{ "wall": "string", "offsetFromCorner": number, "width": 0.9 }],
-  "windows": [{ "wall": "string", "offsetFromCorner": number, "width": number, "count": 1 }],
+  "doors": [{ "wall": "north"|"south"|"east"|"west", "offsetFromCorner": number, "width": 0.9, "hinge": "left"|"right" }],
+  "windows": [{ "wall": "north"|"south"|"east"|"west", "offsetFromCorner": number, "width": number }],
   "designNotes": ["key design decisions explained"]
 }
 
-For MULTI-ROOM (kvartira, apartment, N xonali, OR multiple lines each describing a room):
+For MULTI-ROOM single floor (kvartira, apartment, N xonali, OR multiple lines each describing a room):
 {
   "isMultiRoom": true,
   "totalArea": number,
@@ -143,9 +143,36 @@ For MULTI-ROOM (kvartira, apartment, N xonali, OR multiple lines each describing
       "fixtures": [
         { "type": "string", "wall": "north"|"south"|"east"|"west", "placement": { "offsetFromCorner": number } }
       ],
-      "doors": [{ "wall": "north"|"south"|"east"|"west", "width": 0.9 }],
-      "windows": [{ "wall": "north"|"south"|"east"|"west", "width": 1.2, "count": 1 }]
+      "doors": [{ "wall": "north"|"south"|"east"|"west", "offsetFromCorner": number, "width": 0.9, "hinge": "left"|"right" }],
+      "windows": [{ "wall": "north"|"south"|"east"|"west", "offsetFromCorner": number, "width": 1.2 }]
     }
+  ]
+}
+
+For MULTI-FLOOR building (N qavatli uy, ko'p qavatli bino, multi-storey):
+{
+  "isMultiFloor": true,
+  "floorCount": number,
+  "totalArea": number,
+  "floors": [
+    {
+      "floorNumber": 1,
+      "label": "1-qavat",
+      "rooms": [
+        {
+          "type": "bathroom"|"kitchen"|"bedroom"|"living"|"hallway"|"office",
+          "name": "Uzbek name",
+          "width": number,
+          "length": number,
+          "fixtures": [
+            { "type": "string", "wall": "north"|"south"|"east"|"west", "placement": { "offsetFromCorner": number } }
+          ],
+          "doors": [{ "wall": "north"|"south"|"east"|"west", "offsetFromCorner": number, "width": 0.9, "hinge": "left"|"right" }],
+          "windows": [{ "wall": "north"|"south"|"east"|"west", "offsetFromCorner": number, "width": 1.2 }]
+        }
+      ]
+    },
+    { "floorNumber": 2, "label": "2-qavat", "rooms": [...] }
   ]
 }
 
@@ -159,7 +186,15 @@ CRITICAL RULES:
 5. offsetFromCorner must be realistic: offset + fixture_width < wall_length
 6. Add "reason" field explaining WHY each fixture is placed there
 7. Include designNotes explaining your professional decisions
-8. For Uzbek prompts: understand "mehmonxona"=living room, "yotoqxona"=bedroom, "oshxona"=kitchen, "hammom"=bathroom, "hojatxona"=toilet room, "koridor"=hallway
-9. "katta"=large (+1.5m), "kichik"=small (-0.5m), "zamonaviy"=modern style
-10. Count fixtures: "2 ta stol" = 2 desks, "juft karavot" = double bed
+8. LANGUAGE VOCABULARY:
+   Uzbek: "mehmonxona"=living, "yotoqxona"=bedroom, "oshxona"=kitchen, "hammom"=bathroom, "hojatxona"=toilet room, "koridor"/"xol"=hallway, "unitar"/"unitaz"=toilet fixture, "lavabo"=sink, "vanna"/"vanna"=bathtub, "dush"=shower, "karavot"=bed, "shkaf"=wardrobe, "stol"=table/desk, "divan"=sofa, "televizor"/"TV"=tv_unit, "muzlatgich"=fridge, "plita"=stove, "kreslo"=armchair
+   Russian: "спальня"=bedroom, "гостиная"/"зал"/"комната отдыха"=living, "кухня"=kitchen, "ванная"/"туалет"/"санузел"/"хаммом"=bathroom, "коридор"/"прихожая"=hallway, "кабинет"/"офис"=office, "детская"=bedroom(children), "кровать"=bed, "шкаф"=wardrobe, "диван"=sofa, "стол"=desk/table, "холодильник"=fridge, "плита"=stove, "раковина"=sink, "унитаз"=toilet, "ванна"=bathtub, "душ"=shower
+   English: standard fixture names apply directly
+9. "katta"/"большой"/"large"=large (+1.5m to dimensions), "kichik"/"маленький"/"small"=small (-0.5m)
+10. Count fixtures: "2 ta stol"/"2 кровати"/"2 beds" = 2 instances, "juft karavot"/"двуспальная"/"double bed" = bed with width 1.6m
+11. DOORS: offsetFromCorner = meters from west corner (north/south walls) or north corner (east/west walls). hinge "left"=pivot on low-offset side, "right"=pivot on high-offset side. Default hinge "left". Door must not block fixtures (clearance 600mm in front of door swing).
+12. WINDOWS: offsetFromCorner = meters from same corner as doors. Width typically 1.0–1.8m. At least one window per habitable room. Place near light-favoring fixtures (sink, desk).
+13. Validate: offsetFromCorner + width < wall_length. For doors: offsetFromCorner ≥ 0.1m from corners.
+14. MULTI-FLOOR: detect "N qavatli", "N floor", "N etaj", "ko'p qavatli". Output isMultiFloor=true + floors array. Each floor gets its own rooms. Ground floor (1-qavat): living+kitchen+bathroom+hallway. Upper floors: bedrooms+bathroom. Include staircase room (type:"staircase", 1.2×2.4m) on each floor at same position.
+15. Each floor in multi-floor must include a hallway/koridor (1.2m wide) connecting rooms to staircase.
 `;

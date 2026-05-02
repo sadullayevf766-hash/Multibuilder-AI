@@ -124,7 +124,7 @@ function buildPipe3D(pipe: PlumbingPipe, scene: THREE.Scene) {
   const points = pipe.path.map(p => {
     // engine Y is height above floor 0 bottom
     // FLOOR_HEIGHT engine units = FLOOR_H_3D THREE units
-    const engineFloorH = 220; // must match PlumbingEngine FLOOR_HEIGHT
+    const engineFloorH = 240; // must match PlumbingEngine FLOOR_HEIGHT
     return new THREE.Vector3(
       p.x * S,
       (p.y / engineFloorH) * FLOOR_H_3D,

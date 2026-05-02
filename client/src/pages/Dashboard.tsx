@@ -19,7 +19,7 @@ function AppNav({ email, onSignOut }: { email?: string; onSignOut: () => void })
         <Link to="/dashboard" className="text-lg font-semibold tracking-tight">FloorPlan AI</Link>
         <div className="flex items-center gap-3">
           <span className="text-xs text-gray-400 hidden md:block">{email}</span>
-          <Link to="/generator" className="bg-gray-900 dark:bg-white text-white dark:text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-700 dark:hover:bg-gray-100 transition-colors">
+          <Link to="/select" className="bg-gray-900 dark:bg-white text-white dark:text-black px-4 py-2 rounded-lg text-sm font-medium hover:bg-gray-700 dark:hover:bg-gray-100 transition-colors">
             + Yangi
           </Link>
           <button onClick={onSignOut} className="text-sm text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors px-2 py-2">

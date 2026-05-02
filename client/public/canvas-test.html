@@ -1,0 +1,693 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Canvas Drawing Test — v2 (bug fixes)</title>
+<script src="https://unpkg.com/konva@9/konva.min.js"></script>
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; background: #f0f0f0; font-family: Arial; }
+.header { padding: 10px 16px; background: #1e293b; color: #fff; font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.header span { font-weight: bold; color: #94a3b8; margin-right: 4px; }
+button { padding: 5px 12px; border: none; border-radius: 5px; background: #3b82f6; color: #fff; cursor: pointer; font-size: 12px; }
+button:hover { background: #2563eb; }
+button.active { background: #10b981; }
+#status { padding: 5px 16px; background: #e2e8f0; font-size: 11px; color: #475569; min-height: 22px; }
+#canvas-container { background: white; overflow: hidden; cursor: grab; }
+#canvas-container:active { cursor: grabbing; }
+.checks { padding: 6px 16px; background: #f8fafc; font-size: 11px; color: #334155; border-top: 1px solid #e2e8f0; }
+.ok  { color: #16a34a; font-weight: bold; }
+.err { color: #dc2626; font-weight: bold; }
+#zoom-bar { display:flex; align-items:center; gap:6px; padding:5px 16px;
+  background:#1e293b; border-top:1px solid #334155; }
+#zoom-bar button { padding:3px 10px; font-size:13px; font-weight:bold; }
+#zoom-pct { min-width:52px; text-align:center; font-size:11px; font-family:monospace;
+  color:#94a3b8; background:#0f172a; border-radius:4px; padding:2px 6px; }
+</style>
+</head>
+<body>
+<div class="header">
+  <span>Test:</span>
+  <button onclick="runTest('bathroom')"  id="btn-bathroom">3x4 Hammom</button>
+  <button onclick="runTest('bathroom2')" id="btn-bathroom2">2x3 Kichik hammom</button>
+  <button onclick="runTest('kitchen')"   id="btn-kitchen">4x3.5 Oshxona</button>
+  <button onclick="runTest('bedroom')"   id="btn-bedroom">4x5 Yotoqxona</button>
+  <button onclick="runTest('living')"    id="btn-living">5x6 Mehmonxona</button>
+  <button onclick="runTest('multi_door')" id="btn-multi_door">2 eshik (test)</button>
+  <button onclick="runTest('multi')"     id="btn-multi">Ko'p xonali</button>
+  <button onclick="runBuilding('2floor')" id="btn-2floor" style="background:#7c3aed">🏢 2 Qavatli</button>
+  <button onclick="runBuilding('3floor')" id="btn-3floor" style="background:#7c3aed">🏢 3 Qavatli</button>
+</div>
+<div id="status">Yuklanmoqda...</div>
+<div class="checks" id="checks"></div>
+<div id="zoom-bar">
+  <span style="color:#94a3b8;font-size:11px">Zoom:</span>
+  <button id="btn-zoom-out" onclick="zoomOut()">−</button>
+  <span id="zoom-pct">100%</span>
+  <button id="btn-zoom-in"  onclick="zoomIn()">+</button>
+  <button onclick="resetZoom()" style="font-size:11px;font-weight:normal;background:#334155">↔ Reset</button>
+  <span style="color:#64748b;font-size:10px;margin-left:4px">Ctrl+Scroll yoki ← drag →</span>
+</div>
+<div id="canvas-container"></div>
+
+<script>
+const API = 'http://localhost:5000';
+const W = window.innerWidth;
+
+const TESTS = {
+  bathroom:   { desc: '3x4 hammom, tualet va lavabo', type: 'floor-plan' },
+  bathroom2:  { desc: '2x3 hammom, tualet va lavabo', type: 'floor-plan' },
+  kitchen:    { desc: '4x3.5 oshxona, plita, muzlatgich, lavabo, idish yuvgich', type: 'floor-plan' },
+  bedroom:    { desc: '4x5 yotoqxona, karavot, shkaf, stol', type: 'floor-plan' },
+  living:     { desc: '5x6 mehmonxona, divan, televizor, jurnal stol', type: 'floor-plan' },
+  multi_door: {
+    // Manually inject 2 doors on same wall to test multi-door handling
+    desc: '4x5 yotoqxona, karavot, shkaf', type: 'floor-plan',
+    postProcess: dd => {
+      dd.doors = [
+        { id: 'door-0', wall: 'south', width: 0.9, hinge: 'left' },
+        { id: 'door-1', wall: 'south', width: 0.8, hinge: 'right' },
+      ];
+      return dd;
+    }
+  },
+  multi:      { desc: "5x4 oshxona\n4x3 hammom\n4x5 yotoqxona", type: 'floor-plan' },
+};
+
+// ─── Zoom state (shared across all canvases) ──────────────────────────────
+let currentStage = null;
+let baseScale   = 1;
+let zoomLevel   = 1;
+const ZOOM_STEP = 1.18, MIN_ZOOM = 0.15, MAX_ZOOM = 10;
+
+function updateZoomPct() {
+  document.getElementById('zoom-pct').textContent = Math.round(zoomLevel * 100) + '%';
+}
+
+function applyZoom(newZ, pivotX, pivotY) {
+  if (!currentStage) return;
+  const clamped = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZ));
+  const fs = baseScale * clamped;
+  if (pivotX !== undefined) {
+    const old = currentStage.scaleX();
+    const ptX = (pivotX - currentStage.x()) / old;
+    const ptY = (pivotY - currentStage.y()) / old;
+    currentStage.scale({ x: fs, y: fs });
+    currentStage.position({ x: pivotX - ptX * fs, y: pivotY - ptY * fs });
+  } else {
+    currentStage.scale({ x: fs, y: fs });
+  }
+  currentStage.batchDraw();
+  zoomLevel = clamped;
+  updateZoomPct();
+}
+
+function zoomIn()    { applyZoom(zoomLevel * ZOOM_STEP); }
+function zoomOut()   { applyZoom(zoomLevel / ZOOM_STEP); }
+function resetZoom() {
+  if (!currentStage) return;
+  currentStage.scale({ x: baseScale, y: baseScale });
+  currentStage.position({ x: 0, y: 0 });
+  currentStage.batchDraw();
+  zoomLevel = 1; updateZoomPct();
+}
+
+// ─── Constants matching Canvas2D.tsx ───────────────────────────────────────
+const PAD = 130, WALL_T = 15, DIM_OFFSET = 50, DIM_EXT = 12, TICK_SIZE = 10, GRID_SIZE = 100;
+const UNITS_PER_METER = 100;
+
+const FIXTURE_DIMS = {
+  sink: {w:60,h:50}, toilet: {w:40,h:68}, bathtub: {w:70,h:170},
+  shower: {w:90,h:90}, stove: {w:60,h:60}, fridge: {w:60,h:65},
+  dishwasher: {w:60,h:60}, desk: {w:120,h:60}, bed: {w:160,h:200},
+  wardrobe: {w:120,h:60}, sofa: {w:200,h:90}, tv_unit: {w:150,h:45},
+  bookshelf: {w:80,h:30}, armchair: {w:80,h:80}, coffee_table: {w:90,h:50},
+  dining_table: {w:120,h:80}, chair: {w:50,h:50}, coat_rack: {w:60,h:30},
+};
+
+const FIXTURE_LABELS = {
+  sink:'Lavabo', toilet:'Hojatxona', bathtub:'Vanna', shower:'Dush',
+  stove:'Plita', fridge:'Muzlatgich', dishwasher:'Idish yuv.',
+  desk:'Stol', bed:'Karavot', wardrobe:'Shkaf', sofa:'Divan',
+  tv_unit:'TV', bookshelf:'Kitob javon', armchair:'Kreslo',
+  coffee_table:'Jurnal stol', dining_table:'Ovqat stoli',
+  chair:'Stul', coat_rack:'Kiyim ilgich',
+};
+
+const ROOM_COLORS = {
+  bathroom:'#f0f7ff', hammom:'#f0f7ff', kitchen:'#fff9f0', oshxona:'#fff9f0',
+  bedroom:'#f5fff0', yotoqxona:'#f5fff0', living:'#fffff0', mehmonxona:'#fffff0',
+  zal:'#fffff0', office:'#f9f5ff', ofis:'#f9f5ff', hallway:'#f5f5f5',
+  koridor:'#f5f5f5', default:'#ffffff',
+};
+
+function roomColorFromName(name) {
+  const n = (name||'').toLowerCase();
+  for (const [k,v] of Object.entries(ROOM_COLORS)) {
+    if (k !== 'default' && n.includes(k)) return v;
+  }
+  return ROOM_COLORS.default;
+}
+function roomColorFromFixtures(fixtures) {
+  const types = new Set(fixtures.map(f=>f.type));
+  if (types.has('toilet')||types.has('bathtub')||types.has('shower')) return ROOM_COLORS.bathroom;
+  if (types.has('stove')||types.has('fridge')||types.has('dishwasher'))  return ROOM_COLORS.kitchen;
+  if (types.has('bed'))   return ROOM_COLORS.bedroom;
+  if (types.has('sofa'))  return ROOM_COLORS.living;
+  if (types.has('desk'))  return ROOM_COLORS.office;
+  return ROOM_COLORS.default;
+}
+
+// ─── Test runner ────────────────────────────────────────────────────────────
+let activeBtn = null;
+async function runTest(name) {
+  document.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+  document.getElementById(`btn-${name}`)?.classList.add('active');
+  document.getElementById('status').textContent = 'Yuklanmoqda...';
+  document.getElementById('checks').innerHTML = '';
+
+  const t = TESTS[name];
+  const res = await fetch(API + '/api/generate', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ description: t.desc, drawingType: t.type })
+  });
+  const data = await res.json();
+  let dd = data.drawingData;
+
+  if (t.postProcess) dd = t.postProcess(dd);
+
+  document.getElementById('status').textContent =
+    `Walls: ${dd.walls.length} | Fixtures: ${dd.fixtures.map(f=>f.type).join(', ')} | Pipes: ${dd.pipes.length} | roomName: ${dd.roomName||'—'} | Doors: ${dd.doors.length}`;
+
+  runChecks(dd);
+  renderCanvas2D(dd);
+}
+
+// ─── Automated bug checks ────────────────────────────────────────────────────
+function runChecks(dd) {
+  const checks = [];
+  const walls = {n:{}, e:{}, s:{}, w:{}};
+  dd.walls.forEach(w => { if(w.side==='north') walls.n=w; if(w.side==='south') walls.s=w; if(w.side==='east') walls.e=w; if(w.side==='west') walls.w=w; });
+
+  // 1. Tualet chegaradan chiqmasin
+  dd.fixtures.forEach(f => {
+    if (f.type === 'toilet') {
+      const d = FIXTURE_DIMS.toilet;
+      const south_y = walls.s.start?.y;
+      if (south_y !== undefined) {
+        const bottom = f.position.y + d.h;
+        const gap = south_y - bottom;
+        checks.push({ label: `Tualet bottom (${bottom}) < south_y (${south_y}), gap=${gap}`, ok: gap >= 0 });
+      }
+    }
+  });
+
+  // 2. Hinge mavjudligi
+  dd.doors.forEach((door, i) => {
+    checks.push({ label: `Door[${i}] hinge="${door.hinge||'undefined'}"`, ok: !!door.hinge });
+  });
+
+  // 3. roomName mavjudligi
+  checks.push({ label: `roomName="${dd.roomName||'—'}"`, ok: !!dd.roomName });
+
+  // 4. Ko'p eshik bir devorda ustma-ust tushmasin
+  const doorsByWall = {};
+  dd.doors.forEach(d => { doorsByWall[d.wall] = (doorsByWall[d.wall]||0)+1; });
+  Object.entries(doorsByWall).forEach(([wall, count]) => {
+    if (count > 1) {
+      checks.push({ label: `${count} ta eshik ${wall} devorda — alohida joylashishi kerak`, ok: true });
+    }
+  });
+
+  // 5. 4 ta dimension line
+  checks.push({ label: `Dimensions: ${dd.dimensions.length} (kutilgan: 4)`, ok: dd.dimensions.length === 4 });
+
+  // 6. Fixture bounding box chegaradan chiqmasin
+  dd.fixtures.forEach(f => {
+    const d = FIXTURE_DIMS[f.type] || {w:50,h:50};
+    const southY = walls.s.start?.y;
+    const eastX  = walls.e.start?.x;
+    if (southY !== undefined && eastX !== undefined) {
+      const outX = (f.position.x + d.w) > eastX + 1;
+      const outY = (f.position.y + d.h) > southY + 1;
+      if (outX || outY) checks.push({ label: `${f.type} chegaradan chiqdi! pos=(${f.position.x},${f.position.y}), dims=(${d.w}x${d.h})`, ok: false });
+    }
+  });
+
+  const html = checks.map(c =>
+    `<span class="${c.ok?'ok':'err'}">${c.ok?'✓':'✗'}</span> ${c.label}`
+  ).join(' &nbsp;|&nbsp; ');
+  document.getElementById('checks').innerHTML = html || 'Tekshiruvlar yo\'q';
+}
+
+// ─── Render ──────────────────────────────────────────────────────────────────
+function renderCanvas2D(dd) {
+  const container = document.getElementById('canvas-container');
+  if (currentStage) { currentStage.destroy(); currentStage = null; }
+  container.innerHTML = '';
+
+  const allX = dd.walls.flatMap(w => [w.start.x, w.end.x]);
+  const allY = dd.walls.flatMap(w => [w.start.y, w.end.y]);
+  const minX = Math.min(...allX), minY = Math.min(...allY);
+  const totalWidth  = Math.max(...allX) - minX || 300;
+  const totalHeight = Math.max(...allY) - minY || 400;
+  const contentW = totalWidth  + PAD*2;
+  const contentH = totalHeight + PAD*2 + 180;
+  const autoScale = W / contentW;
+  const H = Math.ceil(contentH * autoScale);
+
+  // Reset zoom on new drawing
+  zoomLevel = 1; baseScale = autoScale; updateZoomPct();
+
+  if (currentStage) { currentStage.destroy(); }
+  const stage = new Konva.Stage({ container, width: W, height: H, scaleX: autoScale, scaleY: autoScale, draggable: true });
+  currentStage = stage;
+  const layer = new Konva.Layer();
+  stage.add(layer);
+
+  // Mouse wheel zoom (cursor-centered)
+  container.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+    const ptr = stage.getPointerPosition() || { x: W/2, y: H/2 };
+    applyZoom(zoomLevel * factor, ptr.x, ptr.y);
+  }, { passive: false });
+
+  // 1. White base
+  layer.add(new Konva.Rect({ x: PAD+minX, y: PAD+minY, width: totalWidth, height: totalHeight, fill: 'white' }));
+
+  // 2. Room color background (single room — FIX 4)
+  const isMultiRoom = dd.dimensions.some(d => d.id.startsWith('label-'));
+  if (isMultiRoom) {
+    dd.dimensions.filter(d => d.id.startsWith('label-')).forEach(d => {
+      const cx = d.start.x + PAD;
+      const cy = (d.start.y + d.end.y)/2 + PAD;
+      const color = roomColorFromName(d.label);
+      layer.add(new Konva.Circle({ x: cx, y: cy, radius: 40, fill: color, opacity: 0.5 }));
+      const parts = d.label.match(/^(.+?)\s+([\d.]+m²)$/);
+      const rName = parts ? parts[1] : d.label;
+      const rArea = parts ? parts[2] : '';
+      layer.add(new Konva.Text({ x: cx-50, y: cy-12, text: rName, fontSize: 10, fontStyle: 'bold', fontFamily: 'Arial', fill: '#111', width: 100, align: 'center' }));
+      if (rArea) layer.add(new Konva.Text({ x: cx-50, y: cy+3, text: rArea, fontSize: 9, fontFamily: 'Arial', fill: '#333', width: 100, align: 'center' }));
+    });
+  } else {
+    const color = dd.roomName ? roomColorFromName(dd.roomName) : roomColorFromFixtures(dd.fixtures);
+    layer.add(new Konva.Rect({ x: PAD+minX+WALL_T, y: PAD+minY+WALL_T, width: totalWidth-WALL_T*2, height: totalHeight-WALL_T*2, fill: color, opacity: 0.6 }));
+    const name = dd.roomName ? (dd.roomName.charAt(0).toUpperCase()+dd.roomName.slice(1)) : 'Xona';
+    const area = ((totalWidth/UNITS_PER_METER)*(totalHeight/UNITS_PER_METER)).toFixed(1);
+    layer.add(new Konva.Text({ x: PAD+minX+totalWidth/2-50, y: PAD+minY+totalHeight/2-12, text: name, fontSize: 10, fontStyle: 'bold', fontFamily: 'Arial', fill: '#111', width: 100, align: 'center' }));
+    layer.add(new Konva.Text({ x: PAD+minX+totalWidth/2-50, y: PAD+minY+totalHeight/2+3,  text: `${area}m²`, fontSize: 9, fontFamily: 'Arial', fill: '#333', width: 100, align: 'center' }));
+  }
+
+  // 3. Grid — aligned with room corners (FIX 3)
+  const startOff = PAD % GRID_SIZE; // 130%100=30 → dots at 30,130,230... 130=PAD ✓
+  const gW = W/autoScale, gH = contentH;
+  for (let i = startOff; i <= gW; i += GRID_SIZE)
+    for (let j = startOff; j <= gH; j += GRID_SIZE)
+      layer.add(new Konva.Circle({ x: i, y: j, radius: 0.8, fill: '#cccccc' }));
+
+  // 4. Pipes
+  (dd.pipes||[]).forEach(p => addPipe(layer, p));
+
+  // 5. Walls + corners
+  dd.walls.forEach(w => addWall(layer, w));
+  fillCorners(layer, dd.walls);
+
+  // 6. Doors — grouped by wall for even spacing (FIX 1 & 2)
+  const doors = dd.doors || [];
+  doors.forEach(door => {
+    const sameWall = doors.filter(d => d.wall === door.wall && (d.wallId||null) === (door.wallId||null));
+    addDoor(layer, door, dd.walls, sameWall);
+  });
+
+  // 7. Windows — grouped by wall
+  const windows = dd.windows || [];
+  windows.forEach(win => {
+    const sameWall = windows.filter(w => w.wall === win.wall && (w.wallId||null) === (win.wallId||null));
+    addWindow(layer, win, dd.walls, sameWall);
+  });
+
+  // 8. Fixtures
+  dd.fixtures.forEach(f => addFixture(layer, f));
+  dd.fixtures.forEach(f => addFixtureLabel(layer, f));
+
+  // 9. Dimensions
+  dd.dimensions.forEach(d => addDimension(layer, d, totalWidth, totalHeight, minX, minY));
+
+  // 10. Title + legend
+  addTitleBlock(layer, totalWidth, totalHeight);
+  addLegend(layer, totalHeight);
+
+  layer.draw();
+}
+
+// ─── Walls ───────────────────────────────────────────────────────────────────
+function addWall(layer, wall) {
+  const offset = wall.thickness/2;
+  const dx = wall.end.x-wall.start.x, dy = wall.end.y-wall.start.y;
+  const len = Math.sqrt(dx*dx+dy*dy);
+  if (len < 1) return;
+  const nx=-dy/len, ny=dx/len, ux=dx/len, uy=dy/len;
+  const sx=wall.start.x+PAD, sy=wall.start.y+PAD, ex=wall.end.x+PAD, ey=wall.end.y+PAD;
+  const ext=offset;
+  layer.add(new Konva.Line({
+    points:[sx-ux*ext+nx*offset, sy-uy*ext+ny*offset, ex+ux*ext+nx*offset, ey+uy*ext+ny*offset,
+            ex+ux*ext-nx*offset, ey+uy*ext-ny*offset, sx-ux*ext-nx*offset, sy-uy*ext-ny*offset],
+    closed:true, fill:'#cccccc', stroke:'#cccccc', strokeWidth:1,
+  }));
+  layer.add(new Konva.Line({ points:[sx+nx*offset,sy+ny*offset,ex+nx*offset,ey+ny*offset], stroke:'#111111', strokeWidth:2.5, lineCap:'square' }));
+  layer.add(new Konva.Line({ points:[sx-nx*offset,sy-ny*offset,ex-nx*offset,ey-ny*offset], stroke:'#111111', strokeWidth:1.5, lineCap:'square' }));
+}
+
+function fillCorners(layer, walls) {
+  const seen = new Set();
+  walls.forEach(wall => {
+    [wall.start, wall.end].forEach(c => {
+      const key = `${c.x},${c.y}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      layer.add(new Konva.Rect({ x: c.x+PAD-WALL_T/2-1, y: c.y+PAD-WALL_T/2-1, width: WALL_T+2, height: WALL_T+2, fill:'#cccccc', strokeWidth:0 }));
+    });
+  });
+}
+
+// ─── Pipes ────────────────────────────────────────────────────────────────────
+function addPipe(layer, p) {
+  const pts = p.path.flatMap(pt=>[pt.x+PAD, pt.y+PAD]);
+  const isDrain=p.type==='drain', isCold=p.type==='cold';
+  const color = isCold ? '#2563eb' : isDrain ? '#64748b' : '#dc2626';
+  layer.add(new Konva.Line({ points:pts, stroke:color, strokeWidth:isDrain?1.5:2, dash:isDrain?[6,4]:undefined, opacity:isDrain?0.75:1 }));
+  if (!isDrain && pts.length>=2) layer.add(new Konva.Circle({ x:pts[pts.length-2], y:pts[pts.length-1], radius:4, fill:color }));
+}
+
+// ─── Fixtures — FIX 5: toilet fits in h=68 ────────────────────────────────
+function addFixture(layer, fixture) {
+  const x=fixture.position.x+PAD, y=fixture.position.y+PAD, t=fixture.type;
+  const g = new Konva.Group();
+
+  if (t==='toilet') {
+    // h=68: tank(0-18) + gap(18-24) + bowl center@44 + radiusY=22 → max 66 < 68 ✓
+    g.add(new Konva.Rect({ x, y, width:40, height:18, fill:'#f5f5f5', stroke:'#1a1a1a', strokeWidth:1.5 }));
+    g.add(new Konva.Ellipse({ x:x+20, y:y+44, radiusX:17, radiusY:22, fill:'#f5f5f5', stroke:'#1a1a1a', strokeWidth:1.5 }));
+    g.add(new Konva.Ellipse({ x:x+20, y:y+44, radiusX:13, radiusY:17, fill:'transparent', stroke:'#1a1a1a', strokeWidth:0.8 }));
+  } else if (t==='sink') {
+    g.add(new Konva.Rect({ x, y, width:60, height:50, fill:'#f5f5f5', stroke:'#1a1a1a', strokeWidth:1.5 }));
+    g.add(new Konva.Rect({ x:x+22, y:y+2, width:16, height:8, fill:'#d0d0d0', stroke:'#1a1a1a', strokeWidth:1 }));
+    g.add(new Konva.Ellipse({ x:x+30, y:y+30, radiusX:18, radiusY:14, fill:'white', stroke:'#1a1a1a', strokeWidth:1 }));
+    g.add(new Konva.Circle({ x:x+30, y:y+30, radius:3, fill:'#1a1a1a' }));
+  } else if (t==='bathtub') {
+    g.add(new Konva.Rect({ x, y, width:70, height:170, fill:'#f5f5f5', stroke:'#1a1a1a', strokeWidth:1.5 }));
+    g.add(new Konva.Rect({ x:x+6, y:y+6, width:58, height:158, fill:'white', stroke:'#1a1a1a', strokeWidth:1, cornerRadius:8 }));
+    g.add(new Konva.Circle({ x:x+35, y:y+148, radius:6, fill:'#e0e0e0', stroke:'#1a1a1a', strokeWidth:1 }));
+    g.add(new Konva.Rect({ x:x+23, y:y+10, width:24, height:10, fill:'#d0d0d0', stroke:'#1a1a1a', strokeWidth:1 }));
+  } else if (t==='shower') {
+    g.add(new Konva.Rect({ x, y, width:90, height:90, fill:'#f0f8ff', stroke:'#1a1a1a', strokeWidth:1.5 }));
+    g.add(new Konva.Arc({ x, y:y+90, innerRadius:0, outerRadius:90, angle:90, rotation:270, fill:'rgba(59,130,246,0.1)', stroke:'#3b82f6', strokeWidth:1 }));
+    g.add(new Konva.Circle({ x:x+45, y:y+45, radius:6, fill:'#3b82f6', opacity:0.5 }));
+  } else if (t==='stove') {
+    g.add(new Konva.Rect({ x, y, width:60, height:60, fill:'#f5f5f5', stroke:'#1a1a1a', strokeWidth:1.5 }));
+    [[x+15,y+15],[x+45,y+15],[x+15,y+45],[x+45,y+45]].forEach(([cx,cy])=>g.add(new Konva.Circle({ x:cx, y:cy, radius:8, stroke:'#1a1a1a', strokeWidth:1 })));
+  } else if (t==='fridge') {
+    g.add(new Konva.Rect({ x, y, width:60, height:65, fill:'#f5f5f5', stroke:'#1a1a1a', strokeWidth:1.5 }));
+    g.add(new Konva.Line({ points:[x,y+20,x+60,y+20], stroke:'#1a1a1a', strokeWidth:1 }));
+  } else if (t==='dishwasher') {
+    g.add(new Konva.Rect({ x, y, width:60, height:60, fill:'#f5f5f5', stroke:'#1a1a1a', strokeWidth:1.5 }));
+    [15,30,45].forEach(d=>g.add(new Konva.Line({ points:[x+8,y+d,x+52,y+d], stroke:'#1a1a1a', strokeWidth:1 })));
+  } else if (t==='bed') {
+    g.add(new Konva.Rect({ x, y, width:160, height:200, fill:'#f5f5f5', stroke:'#1a1a1a', strokeWidth:1.5 }));
+    g.add(new Konva.Rect({ x, y, width:160, height:30, fill:'#d0d0d0', stroke:'#1a1a1a', strokeWidth:1 }));
+    g.add(new Konva.Rect({ x:x+10, y:y+35, width:60, height:35, fill:'#e8e8e8', stroke:'#1a1a1a', strokeWidth:1, cornerRadius:4 }));
+    g.add(new Konva.Rect({ x:x+90, y:y+35, width:60, height:35, fill:'#e8e8e8', stroke:'#1a1a1a', strokeWidth:1, cornerRadius:4 }));
+    g.add(new Konva.Line({ points:[x+5,y+80,x+155,y+80], stroke:'#1a1a1a', strokeWidth:1 }));
+  } else if (t==='wardrobe') {
+    g.add(new Konva.Rect({ x, y, width:120, height:60, fill:'#f5f5f5', stroke:'#1a1a1a', strokeWidth:1.5 }));
+    g.add(new Konva.Line({ points:[x+40,y,x+40,y+60], stroke:'#1a1a1a', strokeWidth:1 }));
+    g.add(new Konva.Line({ points:[x+80,y,x+80,y+60], stroke:'#1a1a1a', strokeWidth:1 }));
+  } else if (t==='sofa') {
+    const sw=200, sh=90;
+    g.add(new Konva.Rect({ x, y, width:sw, height:22, fill:'#c0c0c0', stroke:'#111', strokeWidth:1.5 }));
+    g.add(new Konva.Rect({ x, y:y+22, width:12, height:sh-22, fill:'#b0b0b0', stroke:'#888', strokeWidth:1 }));
+    g.add(new Konva.Rect({ x:x+sw-12, y:y+22, width:12, height:sh-22, fill:'#b0b0b0', stroke:'#888', strokeWidth:1 }));
+    for (let i=0;i<3;i++) g.add(new Konva.Rect({ x:x+12+i*((sw-24)/3)+2, y:y+24, width:(sw-24)/3-4, height:sh-28, fill:'#d8d8d8', stroke:'#999', strokeWidth:1, cornerRadius:3 }));
+  } else if (t==='tv_unit') {
+    g.add(new Konva.Rect({ x, y, width:150, height:45, fill:'#e8e8e8', stroke:'#111', strokeWidth:1.5 }));
+    g.add(new Konva.Rect({ x:x+8, y:y+5, width:134, height:28, fill:'#1a2035', stroke:'#444', strokeWidth:1 }));
+  } else if (t==='desk') {
+    g.add(new Konva.Rect({ x, y, width:120, height:60, fill:'#f5f5f5', stroke:'#1a1a1a', strokeWidth:1.5 }));
+    g.add(new Konva.Rect({ x:x+35, y:y+5, width:50, height:30, fill:'#d0d0d0', stroke:'#1a1a1a', strokeWidth:1 }));
+  } else if (t==='coffee_table') {
+    g.add(new Konva.Rect({ x, y, width:90, height:50, fill:'#f5f0e8', stroke:'#111', strokeWidth:1.5, cornerRadius:2 }));
+    g.add(new Konva.Rect({ x:x+6, y:y+6, width:78, height:38, fill:'#fafaf5', stroke:'#ccc', strokeWidth:0.8 }));
+  } else {
+    g.add(new Konva.Rect({ x, y, width:50, height:50, fill:'#f0f0f0', stroke:'#1a1a1a', strokeWidth:1 }));
+    g.add(new Konva.Text({ x:x+2, y:y+18, text:(FIXTURE_LABELS[t]||t).slice(0,10), fontSize:8, fill:'#555', width:46, align:'center' }));
+  }
+  layer.add(g);
+}
+
+function addFixtureLabel(layer, fixture) {
+  const d = FIXTURE_DIMS[fixture.type] || {w:50,h:50};
+  const cx = fixture.position.x+PAD+d.w/2, cy = fixture.position.y+PAD+d.h/2+2;
+  const fontSize = d.w < 60 ? 7 : 8;
+  layer.add(new Konva.Text({ x:cx-20, y:cy-fontSize/2, text:FIXTURE_LABELS[fixture.type]||fixture.type, fontSize, fill:'#444', width:40, align:'center' }));
+}
+
+// ─── Wall resolver ────────────────────────────────────────────────────────────
+function resolveWall(side, wallId, offsetX, offsetY, walls) {
+  if (wallId) { const f=walls.find(w=>w.id===wallId); if(f) return f; }
+  if (offsetX!==undefined && offsetY!==undefined) {
+    const f=walls.find(w => {
+      if (w.side!==side) return false;
+      const minX=Math.min(w.start.x,w.end.x), minY=Math.min(w.start.y,w.end.y);
+      return Math.abs(minX-offsetX)<20 && Math.abs(minY-offsetY)<20;
+    });
+    if (f) return f;
+  }
+  return walls.find(w=>w.side===side);
+}
+
+// ─── Windows (GOST: 3 parallel lines) ────────────────────────────────────────
+function addWindow(layer, win, walls, sameWall) {
+  const wall = resolveWall(win.wall, win.wallId, win._roomOffsetX, win._roomOffsetY, walls);
+  if (!wall) return;
+  const winWidth = (win.width||1.2)*UNITS_PER_METER, T=wall.thickness;
+  const wsx=wall.start.x+PAD, wsy=wall.start.y+PAD, wex=wall.end.x+PAD, wey=wall.end.y+PAD;
+  const isH = win.wall==='north'||win.wall==='south';
+  let cx, cy;
+  if (win.offsetFromCorner !== undefined) {
+    const off = win.offsetFromCorner*UNITS_PER_METER + winWidth/2;
+    cx = isH ? wsx+off : (wsx+wex)/2;
+    cy = isH ? (wsy+wey)/2 : wsy+off;
+  } else {
+    const idx=sameWall.findIndex(w=>w.id===win.id), cnt=sameWall.length;
+    if (isH) { const seg=(wex-wsx)/(cnt+1); cx=wsx+seg*(idx+1); cy=(wsy+wey)/2; }
+    else      { const seg=(wey-wsy)/(cnt+1); cx=(wsx+wex)/2; cy=wsy+seg*(idx+1); }
+  }
+  const hw=winWidth/2, ext=3;
+  let x1,y1,x2,y2;
+  if (win.wall==='north')     {x1=cx-hw;y1=wsy-T/2-ext;x2=cx+hw;y2=wsy+T/2+ext;}
+  else if (win.wall==='south'){x1=cx-hw;y1=wey-T/2-ext;x2=cx+hw;y2=wey+T/2+ext;}
+  else if (win.wall==='east') {x1=wex-T/2-ext;y1=cy-hw;x2=wex+T/2+ext;y2=cy+hw;}
+  else                        {x1=wsx-T/2-ext;y1=cy-hw;x2=wsx+T/2+ext;y2=cy+hw;}
+  const g=new Konva.Group();
+  g.add(new Konva.Rect({x:x1,y:y1,width:x2-x1,height:y2-y1,fill:'white'}));
+  if (isH) {
+    g.add(new Konva.Line({points:[x1,y1,x2,y1],stroke:'#1a1a1a',strokeWidth:1.2}));
+    g.add(new Konva.Line({points:[x1,(y1+y2)/2,x2,(y1+y2)/2],stroke:'#1a1a1a',strokeWidth:2}));
+    g.add(new Konva.Line({points:[x1,y2,x2,y2],stroke:'#1a1a1a',strokeWidth:1.2}));
+  } else {
+    g.add(new Konva.Line({points:[x1,y1,x1,y2],stroke:'#1a1a1a',strokeWidth:1.2}));
+    g.add(new Konva.Line({points:[(x1+x2)/2,y1,(x1+x2)/2,y2],stroke:'#1a1a1a',strokeWidth:2}));
+    g.add(new Konva.Line({points:[x2,y1,x2,y2],stroke:'#1a1a1a',strokeWidth:1.2}));
+  }
+  layer.add(g);
+}
+
+// ─── Doors — FIX 1,2,7: offsetFromCorner + multi + hinge ─────────────────────
+function addDoor(layer, door, walls, sameWall) {
+  const wall = resolveWall(door.wall, door.wallId, door._roomOffsetX, door._roomOffsetY, walls);
+  if (!wall) return;
+  const dw=(door.width||0.9)*UNITS_PER_METER, T=wall.thickness, side=door.wall;
+  const wsx=wall.start.x+PAD, wsy=wall.start.y+PAD, wex=wall.end.x+PAD, wey=wall.end.y+PAD;
+  const isH = side==='north'||side==='south';
+  let cx, cy;
+  if (door.offsetFromCorner !== undefined) {
+    const off = door.offsetFromCorner*UNITS_PER_METER + dw/2;
+    cx = isH ? wsx+off : (wsx+wex)/2;
+    cy = isH ? (wsy+wey)/2 : wsy+off;
+  } else {
+    const idx=sameWall.findIndex(d=>d.id===door.id), cnt=sameWall.length;
+    if (isH) { const seg=(wex-wsx)/(cnt+1); cx=wsx+seg*(idx+1); cy=(wsy+wey)/2; }
+    else      { const seg=(wey-wsy)/(cnt+1); cx=(wsx+wex)/2; cy=wsy+seg*(idx+1); }
+  }
+  const hinge = door.hinge || 'left';
+  let gapX,gapY,gapW,gapH,pivotX,pivotY,leafX,leafY;
+  if (side==='north') {
+    gapX=cx-dw/2; gapY=cy-T/2; gapW=dw; gapH=T;
+    if (hinge==='left')  { pivotX=gapX;    pivotY=cy+T/2; leafX=pivotX; leafY=pivotY+dw; }
+    else                 { pivotX=gapX+dw; pivotY=cy+T/2; leafX=pivotX; leafY=pivotY+dw; }
+  } else if (side==='south') {
+    gapX=cx-dw/2; gapY=cy-T/2; gapW=dw; gapH=T;
+    if (hinge==='right') { pivotX=gapX;    pivotY=cy-T/2; leafX=pivotX; leafY=pivotY-dw; }
+    else                 { pivotX=gapX+dw; pivotY=cy-T/2; leafX=pivotX; leafY=pivotY-dw; }
+  } else if (side==='east') {
+    gapX=cx-T/2; gapY=cy-dw/2; gapW=T; gapH=dw;
+    if (hinge==='left') { pivotX=cx-T/2; pivotY=gapY;    leafX=pivotX-dw; leafY=pivotY; }
+    else                { pivotX=cx-T/2; pivotY=gapY+dw; leafX=pivotX-dw; leafY=pivotY; }
+  } else {
+    gapX=cx-T/2; gapY=cy-dw/2; gapW=T; gapH=dw;
+    if (hinge==='left') { pivotX=cx+T/2; pivotY=gapY;    leafX=pivotX+dw; leafY=pivotY; }
+    else                { pivotX=cx+T/2; pivotY=gapY+dw; leafX=pivotX+dw; leafY=pivotY; }
+  }
+  const kappa=0.5523;
+  let arcPts;
+  if (side==='north') {
+    arcPts = hinge==='left'
+      ? [leafX,leafY,leafX+dw*kappa,leafY,pivotX+dw,pivotY+dw*(1-kappa),pivotX+dw,pivotY]
+      : [leafX,leafY,leafX-dw*kappa,leafY,pivotX-dw,pivotY+dw*(1-kappa),pivotX-dw,pivotY];
+  } else if (side==='south') {
+    arcPts = hinge==='right'
+      ? [leafX,leafY,leafX+dw*kappa,leafY,pivotX+dw,pivotY-dw*(1-kappa),pivotX+dw,pivotY]
+      : [leafX,leafY,leafX-dw*kappa,leafY,pivotX-dw,pivotY-dw*(1-kappa),pivotX-dw,pivotY];
+  } else if (side==='east') {
+    arcPts = hinge==='left'
+      ? [leafX,leafY,leafX,leafY+dw*kappa,pivotX-dw*(1-kappa),pivotY+dw,pivotX,pivotY+dw]
+      : [leafX,leafY,leafX,leafY-dw*kappa,pivotX-dw*(1-kappa),pivotY-dw,pivotX,pivotY-dw];
+  } else {
+    arcPts = hinge==='left'
+      ? [leafX,leafY,leafX,leafY+dw*kappa,pivotX+dw*(1-kappa),pivotY+dw,pivotX,pivotY+dw]
+      : [leafX,leafY,leafX,leafY-dw*kappa,pivotX+dw*(1-kappa),pivotY-dw,pivotX,pivotY-dw];
+  }
+  const g=new Konva.Group();
+  g.add(new Konva.Rect({x:gapX,y:gapY,width:gapW,height:gapH,fill:'white'}));
+  g.add(new Konva.Line({points:arcPts,bezier:true,stroke:'#555',strokeWidth:1,dash:[4,3]}));
+  g.add(new Konva.Line({points:[pivotX,pivotY,leafX,leafY],stroke:'#000',strokeWidth:3}));
+  layer.add(g);
+}
+
+// ─── Dimension lines ──────────────────────────────────────────────────────────
+function addDimension(layer, dim, totalW, totalH, minX, minY) {
+  if (dim.value===0) return;
+  const sx=dim.start.x+PAD, sy=dim.start.y+PAD, ex=dim.end.x+PAD, ey=dim.end.y+PAD;
+  const mx=(sx+ex)/2, my=(sy+ey)/2;
+  const dx=ex-sx, dy=ey-sy, len=Math.sqrt(dx*dx+dy*dy);
+  if (len<1) return;
+  const ux=dx/len, uy=dy/len;
+  let nx=-uy, ny=ux;
+  const rcx=PAD+minX+totalW/2, rcy=PAD+minY+totalH/2;
+  if (nx*(rcx-mx)+ny*(rcy-my)>0) { nx=-nx; ny=-ny; }
+  const ax=sx+nx*DIM_OFFSET, ay=Math.max(30,sy+ny*DIM_OFFSET);
+  const bx=ex+nx*DIM_OFFSET, by=Math.max(30,ey+ny*DIM_OFFSET);
+  layer.add(new Konva.Line({points:[ax,ay,bx,by],stroke:'#555',strokeWidth:0.8}));
+  layer.add(new Konva.Line({points:[sx,sy,sx+nx*(DIM_OFFSET+DIM_EXT),sy+ny*(DIM_OFFSET+DIM_EXT)],stroke:'#555',strokeWidth:0.8}));
+  layer.add(new Konva.Line({points:[ex,ey,ex+nx*(DIM_OFFSET+DIM_EXT),ey+ny*(DIM_OFFSET+DIM_EXT)],stroke:'#555',strokeWidth:0.8}));
+  const half=TICK_SIZE/2;
+  layer.add(new Konva.Line({points:[ax-ux*half-nx*half,ay-uy*half-ny*half,ax+ux*half+nx*half,ay+uy*half+ny*half],stroke:'#333',strokeWidth:1.2}));
+  layer.add(new Konva.Line({points:[bx-ux*half-nx*half,by-uy*half-ny*half,bx+ux*half+nx*half,by+uy*half+ny*half],stroke:'#333',strokeWidth:1.2}));
+  layer.add(new Konva.Text({x:mx+nx*(DIM_OFFSET+6)-22,y:my+ny*(DIM_OFFSET+6)-6,text:dim.label,fontSize:9.5,fontFamily:'Arial',fill:'#111',width:44,align:'center'}));
+}
+
+// ─── Title block & legend ─────────────────────────────────────────────────────
+function addTitleBlock(layer, totalWidth, totalHeight) {
+  const bW=220,bH=80,bX=Math.max(totalWidth+PAD-bW-5,PAD+160),bY=totalHeight+PAD+110;
+  const date=new Date().toLocaleDateString('uz-UZ');
+  const g=new Konva.Group();
+  g.add(new Konva.Rect({x:bX,y:bY,width:bW,height:bH,stroke:'#1a1a1a',strokeWidth:1.5,fill:'white'}));
+  g.add(new Konva.Line({points:[bX+100,bY,bX+100,bY+bH],stroke:'#1a1a1a',strokeWidth:0.8}));
+  [20,40,60].forEach(dy=>g.add(new Konva.Line({points:[bX,bY+dy,bX+bW,bY+dy],stroke:'#1a1a1a',strokeWidth:0.8})));
+  g.add(new Konva.Text({x:bX+4,y:bY+4,text:'Loyiha nomi',fontSize:8,fontFamily:'Arial',fill:'#555'}));
+  g.add(new Konva.Text({x:bX+4,y:bY+24,text:'Floor Plan',fontSize:10,fontFamily:'Arial',fontStyle:'bold',fill:'#1a1a1a'}));
+  g.add(new Konva.Text({x:bX+4,y:bY+44,text:'Masshtab',fontSize:8,fontFamily:'Arial',fill:'#555'}));
+  g.add(new Konva.Text({x:bX+4,y:bY+54,text:'1:50',fontSize:10,fontFamily:'Arial',fontStyle:'bold',fill:'#1a1a1a'}));
+  g.add(new Konva.Text({x:bX+4,y:bY+64,text:'SNiP 2.04.01-85',fontSize:8,fontFamily:'Arial',fill:'#555'}));
+  g.add(new Konva.Text({x:bX+104,y:bY+4,text:'Sana',fontSize:8,fontFamily:'Arial',fill:'#555'}));
+  g.add(new Konva.Text({x:bX+104,y:bY+14,text:date,fontSize:9,fontFamily:'Arial',fill:'#1a1a1a'}));
+  layer.add(g);
+}
+function addLegend(layer, totalHeight) {
+  const lx=PAD,ly=totalHeight+PAD+110;
+  const g=new Konva.Group();
+  g.add(new Konva.Rect({x:lx,y:ly,width:165,height:55,fill:'white',stroke:'#bbb',strokeWidth:0.8}));
+  g.add(new Konva.Line({points:[lx+8,ly+13,lx+33,ly+13],stroke:'#2563eb',strokeWidth:2}));
+  g.add(new Konva.Text({x:lx+38,y:ly+7,text:'Sovuq suv (H)',fontSize:9,fontFamily:'Arial',fill:'#111'}));
+  g.add(new Konva.Line({points:[lx+8,ly+29,lx+33,ly+29],stroke:'#dc2626',strokeWidth:2}));
+  g.add(new Konva.Text({x:lx+38,y:ly+23,text:'Issiq suv (I)',fontSize:9,fontFamily:'Arial',fill:'#111'}));
+  g.add(new Konva.Line({points:[lx+8,ly+45,lx+33,ly+45],stroke:'#64748b',strokeWidth:1.5,dash:[6,4],opacity:0.75}));
+  g.add(new Konva.Text({x:lx+38,y:ly+39,text:'Kanalizatsiya (K)',fontSize:9,fontFamily:'Arial',fill:'#111'}));
+  layer.add(g);
+}
+
+// ─── Multi-floor building test ────────────────────────────────────────────────
+const BUILDING_TESTS = {
+  '2floor': '2 qavatli uy: 1-qavatda mehmonxona 5x6, oshxona 4x4; 2-qavatda yotoqxona 4x5, hammom 2x3',
+  '3floor': '3 qavatli uy: 1-qavat mehmonxona va oshxona; 2-qavat 2 yotoqxona va hammom; 3-qavat bolalar xonasi va ofis',
+};
+
+let currentFloor = 0;
+let buildingFloorDrawings = [];
+
+async function runBuilding(name) {
+  document.querySelectorAll('button').forEach(b=>b.classList.remove('active'));
+  document.getElementById(`btn-${name}`)?.classList.add('active');
+  document.getElementById('status').textContent = 'Bino yuklanmoqda...';
+  document.getElementById('checks').innerHTML = '';
+
+  const desc = BUILDING_TESTS[name];
+  const res = await fetch(API + '/api/generate-building', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ description: desc })
+  });
+  const data = await res.json();
+  const { building, floorDrawings } = data;
+  buildingFloorDrawings = floorDrawings;
+
+  // Create floor tabs
+  const header = document.querySelector('.header');
+  const existing = document.getElementById('floor-tabs');
+  if (existing) existing.remove();
+  const tabs = document.createElement('div');
+  tabs.id = 'floor-tabs';
+  tabs.style.cssText = 'display:flex;gap:4px;padding:6px 16px;background:#0f172a;border-top:1px solid #334155';
+  building.floors.forEach((fl, i) => {
+    const btn = document.createElement('button');
+    btn.textContent = `${fl.label} (+${fl.elevation}m · ${fl.rooms.length} xona)`;
+    btn.style.cssText = `background:${i===0?'#10b981':'#334155'};font-size:11px;padding:4px 10px`;
+    btn.onclick = () => {
+      document.querySelectorAll('#floor-tabs button').forEach(b=>b.style.background='#334155');
+      btn.style.background = '#10b981';
+      renderFloor(floorDrawings[i], fl, building);
+    };
+    tabs.appendChild(btn);
+  });
+  document.body.insertBefore(tabs, document.getElementById('canvas-container'));
+
+  // Building checks
+  const checks = [
+    { label: `${building.floors.length} qavat generatsiya qilindi`, ok: building.floors.length >= 2 },
+    { label: `${floorDrawings.length} ta DrawingData`, ok: floorDrawings.length === building.floors.length },
+    { label: `Elevations to'g'ri (0, 3, 6...)`, ok: building.floors.every((f,i) => f.elevation === i*3) },
+    { label: `Staircase bor`, ok: floorDrawings.every(fd => fd.staircaseSpec) },
+    { label: `floorLabel bor`, ok: floorDrawings.every(fd => fd.floorLabel) },
+  ];
+  document.getElementById('checks').innerHTML = checks.map(c =>
+    `<span class="${c.ok?'ok':'err'}">${c.ok?'✓':'✗'}</span> ${c.label}`
+  ).join(' | ');
+
+  document.getElementById('status').textContent =
+    `Building: ${building.floors.length} qavat | footprint: ${building.footprint.width.toFixed(1)}×${building.footprint.length.toFixed(1)}m`;
+
+  // Show first floor
+  renderFloor(floorDrawings[0], building.floors[0], building);
+}
+
+function renderFloor(dd, floor, building) {
+  document.getElementById('status').textContent =
+    `${floor.label} (+${floor.elevation}m) | walls=${dd.walls.length} fix=${dd.fixtures.length} stair=${dd.staircaseSpec?'✓':'✗'}`;
+  renderCanvas2D(dd);
+}
+
+// Auto-load
+runTest('bathroom');
+</script>
+</body>
+</html>

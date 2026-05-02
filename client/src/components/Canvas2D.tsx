@@ -1,10 +1,18 @@
-import { useRef, forwardRef, useImperativeHandle, useEffect } from 'react';
+import { useRef, forwardRef, useImperativeHandle, useEffect, useState, useCallback } from 'react';
 import Konva from 'konva';
 import jsPDF from 'jspdf';
-import type { DrawingData, Wall, PlacedFixture, Pipe, DimensionLine, DoorSpec, WindowSpec } from '../../../shared/types';
+import ZoomToolbar from './ZoomToolbar';
+import type {
+  DrawingData, Wall, PlacedFixture, Pipe, DimensionLine,
+  DoorSpec, WindowSpec, StaircaseSpec, InterRoomDoor,
+} from '../../../shared/types';
+import { FIXTURE_DIMS, UNITS_PER_METER, WALL_THICKNESS as WALL_T } from '../../../shared/constants';
 
 export interface Canvas2DHandle {
   exportToPdf: (filename?: string) => void;
+  zoomIn: () => void;
+  zoomOut: () => void;
+  resetZoom: () => void;
 }
 
 interface Canvas2DProps {
@@ -20,32 +28,63 @@ const FIXTURE_LABELS: Record<string, string> = {
   desk: 'Stol', bed: 'Karavot', wardrobe: 'Shkaf',
   sofa: 'Divan', tv_unit: 'TV', bookshelf: 'Kitob javon',
   armchair: 'Kreslo', coffee_table: 'Jurnal stol', dining_table: 'Ovqat stoli',
-  chair: 'Stul', coat_rack: 'Kiyim ilgich'
+  chair: 'Stul', coat_rack: 'Kiyim ilgich',
 };
 
 const ROOM_COLORS: Record<string, string> = {
-  kitchen: '#fff9f0', bathroom: '#f0f7ff', bedroom: '#f5fff0',
-  living: '#fffff0', office: '#f9f5ff', hallway: '#f5f5f5', default: '#ffffff'
+  kitchen:    '#fff9f0',
+  oshxona:    '#fff9f0',
+  bathroom:   '#f0f7ff',
+  hammom:     '#f0f7ff',
+  bedroom:    '#f5fff0',
+  yotoqxona:  '#f5fff0',
+  living:     '#fffff0',
+  mehmonxona: '#fffff0',
+  zal:        '#fffff0',
+  office:     '#f9f5ff',
+  ofis:       '#f9f5ff',
+  hallway:    '#f5f5f5',
+  koridor:    '#f5f5f5',
+  default:    '#ffffff',
 };
 
+// Fixture type → room color (single-room heuristic)
+function roomColorFromFixtures(fixtures: PlacedFixture[]): string {
+  const types = new Set(fixtures.map(f => f.type));
+  if (types.has('toilet') || types.has('bathtub') || types.has('shower')) return ROOM_COLORS.bathroom;
+  if (types.has('stove') || types.has('fridge') || types.has('dishwasher'))  return ROOM_COLORS.kitchen;
+  if (types.has('bed'))    return ROOM_COLORS.bedroom;
+  if (types.has('sofa'))   return ROOM_COLORS.living;
+  if (types.has('desk'))   return ROOM_COLORS.office;
+  return ROOM_COLORS.default;
+}
+
+function roomColorFromName(name: string): string {
+  const n = (name || '').toLowerCase();
+  for (const [key, color] of Object.entries(ROOM_COLORS)) {
+    if (key !== 'default' && n.includes(key)) return color;
+  }
+  return ROOM_COLORS.default;
+}
+
 const GRID_SIZE = 100;
-const PAD = 130;         // canvas padding — must be > DIM_OFFSET + DIM_EXT
-const WALL_T = 15;
+const PAD = 130;
 const DIM_OFFSET = 50;
 const DIM_EXT = 12;
 const TICK_SIZE = 10;
 
-// ── Grid (dots at intersections — cleaner look) ───────────────────────────────
+// ── Grid — aligned with room corners (offset = PAD % GRID_SIZE) ───────────────
 
 function addGrid(layer: Konva.Layer, gridW: number, gridH: number) {
-  for (let i = 0; i <= gridW; i += GRID_SIZE) {
-    for (let j = 0; j <= gridH; j += GRID_SIZE) {
+  const startOff = PAD % GRID_SIZE; // = 30, so dots at 30, 130, 230... → 130 = PAD ✓
+  for (let i = startOff; i <= gridW; i += GRID_SIZE) {
+    for (let j = startOff; j <= gridH; j += GRID_SIZE) {
       layer.add(new Konva.Circle({ x: i, y: j, radius: 0.8, fill: '#cccccc' }));
     }
   }
 }
 
-// ── Walls (closed polygon fill + face lines with square lineCap) ──────────────
+// ── Walls ─────────────────────────────────────────────────────────────────────
 
 function addWall(layer: Konva.Layer, wall: Wall) {
   const offset = wall.thickness / 2;
@@ -54,24 +93,21 @@ function addWall(layer: Konva.Layer, wall: Wall) {
   const len = Math.sqrt(dx * dx + dy * dy);
   if (len < 1) return;
   const nx = -dy / len;
-  const ny = dx / len;
+  const ny =  dx / len;
 
   const sx = wall.start.x + PAD;
   const sy = wall.start.y + PAD;
-  const ex = wall.end.x + PAD;
-  const ey = wall.end.y + PAD;
+  const ex = wall.end.x   + PAD;
+  const ey = wall.end.y   + PAD;
 
-  // Extend endpoints slightly to close corner gaps
   const ext = offset;
   const ux = dx / len;
   const uy = dy / len;
-
   const sxe = sx - ux * ext;
   const sye = sy - uy * ext;
   const exe = ex + ux * ext;
   const eye = ey + uy * ext;
 
-  // Closed polygon fill (grey) — extended at both ends to fill corners
   layer.add(new Konva.Line({
     points: [
       sxe + nx * offset, sye + ny * offset,
@@ -81,12 +117,10 @@ function addWall(layer: Konva.Layer, wall: Wall) {
     ],
     closed: true, fill: '#cccccc', stroke: '#cccccc', strokeWidth: 1,
   }));
-  // Outer face line (heavier — 0.7mm equivalent)
   layer.add(new Konva.Line({
     points: [sx + nx * offset, sy + ny * offset, ex + nx * offset, ey + ny * offset],
     stroke: '#111111', strokeWidth: 2.5, lineCap: 'square',
   }));
-  // Inner face line (lighter — 0.5mm equivalent)
   layer.add(new Konva.Line({
     points: [sx - nx * offset, sy - ny * offset, ex - nx * offset, ey - ny * offset],
     stroke: '#111111', strokeWidth: 1.5, lineCap: 'square',
@@ -107,22 +141,16 @@ function addPipe(layer: Konva.Layer, pipe: Pipe) {
     dash: isDrain ? [6, 4] : undefined,
     opacity: isDrain ? 0.75 : 1,
   }));
-  // Directional arrow at endpoint for hot/cold only
-  if (!isDrain && points.length >= 4) {
-    const ex = points[points.length - 2];
-    const ey = points[points.length - 1];
-    const px = points[points.length - 4];
-    const py = points[points.length - 3];
-    layer.add(new Konva.Arrow({
-      points: [px, py, ex, ey],
-      stroke: color, fill: color,
-      strokeWidth: 2,
-      pointerLength: 6, pointerWidth: 5,
+  if (!isDrain && points.length >= 2) {
+    layer.add(new Konva.Circle({
+      x: points[points.length - 2],
+      y: points[points.length - 1],
+      radius: 4, fill: color, strokeWidth: 0,
     }));
   }
 }
 
-// ── Fixtures (professional CAD details) ───────────────────────────────────────
+// ── Fixtures — professional CAD details, all fit within FIXTURE_DIMS bounds ───
 
 function addFixture(layer: Konva.Layer, fixture: PlacedFixture) {
   const x = fixture.position.x + PAD;
@@ -130,33 +158,26 @@ function addFixture(layer: Konva.Layer, fixture: PlacedFixture) {
   const t = fixture.type;
 
   if (t === 'toilet') {
+    // Bounding box: w=40, h=68 (from FIXTURE_DIMS)
+    // Tank: y..y+18, gap 6, bowl center at y+38, radiusY=24 → max y+62 < 68 ✓
     const g = new Konva.Group();
-    // Tank
-    g.add(new Konva.Rect({ x, y, width: 40, height: 20, fill: '#f5f5f5', stroke: '#1a1a1a', strokeWidth: 1.5 }));
-    // Bowl ellipse
-    g.add(new Konva.Ellipse({ x: x + 20, y: y + 50, radiusX: 18, radiusY: 25, fill: '#f5f5f5', stroke: '#1a1a1a', strokeWidth: 1.5 }));
-    // Inner seat line
-    g.add(new Konva.Ellipse({ x: x + 20, y: y + 50, radiusX: 14, radiusY: 20, fill: 'transparent', stroke: '#1a1a1a', strokeWidth: 0.8 }));
+    g.add(new Konva.Rect({ x, y, width: 40, height: 18, fill: '#f5f5f5', stroke: '#1a1a1a', strokeWidth: 1.5 }));
+    g.add(new Konva.Ellipse({ x: x + 20, y: y + 44, radiusX: 17, radiusY: 22, fill: '#f5f5f5', stroke: '#1a1a1a', strokeWidth: 1.5 }));
+    g.add(new Konva.Ellipse({ x: x + 20, y: y + 44, radiusX: 13, radiusY: 17, fill: 'transparent', stroke: '#1a1a1a', strokeWidth: 0.8 }));
     layer.add(g);
   } else if (t === 'sink') {
     const g = new Konva.Group();
     g.add(new Konva.Rect({ x, y, width: 60, height: 50, fill: '#f5f5f5', stroke: '#1a1a1a', strokeWidth: 1.5 }));
-    // Faucet rect at top
     g.add(new Konva.Rect({ x: x + 22, y: y + 2, width: 16, height: 8, fill: '#d0d0d0', stroke: '#1a1a1a', strokeWidth: 1 }));
-    // Basin ellipse
     g.add(new Konva.Ellipse({ x: x + 30, y: y + 30, radiusX: 18, radiusY: 14, fill: 'white', stroke: '#1a1a1a', strokeWidth: 1 }));
-    // Drain circle
     g.add(new Konva.Circle({ x: x + 30, y: y + 30, radius: 3, fill: '#1a1a1a' }));
     layer.add(g);
   } else if (t === 'bathtub') {
     const g = new Konva.Group();
-    g.add(new Konva.Rect({ x, y, width: 80, height: 180, fill: '#f5f5f5', stroke: '#1a1a1a', strokeWidth: 1.5 }));
-    // Inner rounded rect
-    g.add(new Konva.Rect({ x: x + 8, y: y + 8, width: 64, height: 164, fill: 'white', stroke: '#1a1a1a', strokeWidth: 1, cornerRadius: 10 }));
-    // Drain circle
-    g.add(new Konva.Circle({ x: x + 40, y: y + 155, radius: 6, fill: '#e0e0e0', stroke: '#1a1a1a', strokeWidth: 1 }));
-    // Faucet rect
-    g.add(new Konva.Rect({ x: x + 28, y: y + 12, width: 24, height: 10, fill: '#d0d0d0', stroke: '#1a1a1a', strokeWidth: 1 }));
+    g.add(new Konva.Rect({ x, y, width: 70, height: 170, fill: '#f5f5f5', stroke: '#1a1a1a', strokeWidth: 1.5 }));
+    g.add(new Konva.Rect({ x: x + 6, y: y + 6, width: 58, height: 158, fill: 'white', stroke: '#1a1a1a', strokeWidth: 1, cornerRadius: 8 }));
+    g.add(new Konva.Circle({ x: x + 35, y: y + 148, radius: 6, fill: '#e0e0e0', stroke: '#1a1a1a', strokeWidth: 1 }));
+    g.add(new Konva.Rect({ x: x + 23, y: y + 10, width: 24, height: 10, fill: '#d0d0d0', stroke: '#1a1a1a', strokeWidth: 1 }));
     layer.add(g);
   } else if (t === 'shower') {
     const g = new Konva.Group();
@@ -185,28 +206,22 @@ function addFixture(layer: Konva.Layer, fixture: PlacedFixture) {
   } else if (t === 'desk') {
     const g = new Konva.Group();
     g.add(new Konva.Rect({ x, y, width: 120, height: 60, fill: '#f5f5f5', stroke: '#1a1a1a', strokeWidth: 1.5 }));
-    // Monitor rectangle on top
     g.add(new Konva.Rect({ x: x + 35, y: y + 5, width: 50, height: 30, fill: '#d0d0d0', stroke: '#1a1a1a', strokeWidth: 1 }));
     g.add(new Konva.Rect({ x: x + 55, y: y + 35, width: 10, height: 8, fill: '#b0b0b0', stroke: '#1a1a1a', strokeWidth: 0.5 }));
     layer.add(g);
   } else if (t === 'bed') {
     const g = new Konva.Group();
     g.add(new Konva.Rect({ x, y, width: 160, height: 200, fill: '#f5f5f5', stroke: '#1a1a1a', strokeWidth: 1.5 }));
-    // Headboard
     g.add(new Konva.Rect({ x, y, width: 160, height: 30, fill: '#d0d0d0', stroke: '#1a1a1a', strokeWidth: 1 }));
-    // Two pillows
     g.add(new Konva.Rect({ x: x+10, y: y+35, width: 60, height: 35, fill: '#e8e8e8', stroke: '#1a1a1a', strokeWidth: 1, cornerRadius: 4 }));
     g.add(new Konva.Rect({ x: x+90, y: y+35, width: 60, height: 35, fill: '#e8e8e8', stroke: '#1a1a1a', strokeWidth: 1, cornerRadius: 4 }));
-    // Blanket line
     g.add(new Konva.Line({ points: [x+5, y+80, x+155, y+80], stroke: '#1a1a1a', strokeWidth: 1 }));
     layer.add(g);
   } else if (t === 'wardrobe') {
     const g = new Konva.Group();
     g.add(new Konva.Rect({ x, y, width: 120, height: 60, fill: '#f5f5f5', stroke: '#1a1a1a', strokeWidth: 1.5 }));
-    // 3-panel door lines
     g.add(new Konva.Line({ points: [x+40, y, x+40, y+60], stroke: '#1a1a1a', strokeWidth: 1 }));
     g.add(new Konva.Line({ points: [x+80, y, x+80, y+60], stroke: '#1a1a1a', strokeWidth: 1 }));
-    // Handle lines
     g.add(new Konva.Line({ points: [x+18, y+28, x+22, y+32], stroke: '#1a1a1a', strokeWidth: 1.5 }));
     g.add(new Konva.Line({ points: [x+58, y+28, x+62, y+32], stroke: '#1a1a1a', strokeWidth: 1.5 }));
     g.add(new Konva.Line({ points: [x+98, y+28, x+102, y+32], stroke: '#1a1a1a', strokeWidth: 1.5 }));
@@ -214,33 +229,24 @@ function addFixture(layer: Konva.Layer, fixture: PlacedFixture) {
   } else if (t === 'sofa') {
     const sw = 200, sh = 90;
     const g = new Konva.Group();
-    // Back panel
     g.add(new Konva.Rect({ x, y, width: sw, height: 22, fill: '#c0c0c0', stroke: '#111111', strokeWidth: 1.5 }));
-    // Left armrest
     g.add(new Konva.Rect({ x, y: y+22, width: 12, height: sh-22, fill: '#b0b0b0', stroke: '#888888', strokeWidth: 1 }));
-    // Right armrest
     g.add(new Konva.Rect({ x: x+sw-12, y: y+22, width: 12, height: sh-22, fill: '#b0b0b0', stroke: '#888888', strokeWidth: 1 }));
-    // 3 seat cushions
     for (let i = 0; i < 3; i++) {
       g.add(new Konva.Rect({
         x: x+12+i*((sw-24)/3)+2, y: y+24,
         width: (sw-24)/3-4, height: sh-28,
-        fill: '#d8d8d8', stroke: '#999999', strokeWidth: 1, cornerRadius: 3
+        fill: '#d8d8d8', stroke: '#999999', strokeWidth: 1, cornerRadius: 3,
       }));
     }
-    // Cushion seam lines
     g.add(new Konva.Line({ points: [x+12+(sw-24)/3, y+24, x+12+(sw-24)/3, y+sh], stroke: '#aaaaaa', strokeWidth: 0.8 }));
     g.add(new Konva.Line({ points: [x+12+2*(sw-24)/3, y+24, x+12+2*(sw-24)/3, y+sh], stroke: '#aaaaaa', strokeWidth: 0.8 }));
     layer.add(g);
   } else if (t === 'tv_unit') {
     const g = new Konva.Group();
-    // Cabinet base
     g.add(new Konva.Rect({ x, y, width: 150, height: 45, fill: '#e8e8e8', stroke: '#111111', strokeWidth: 1.5 }));
-    // TV screen (dark inset)
     g.add(new Konva.Rect({ x: x+8, y: y+5, width: 134, height: 28, fill: '#1a2035', stroke: '#444444', strokeWidth: 1 }));
-    // Screen glare line
     g.add(new Konva.Line({ points: [x+12, y+8, x+30, y+8], stroke: '#ffffff', strokeWidth: 1, opacity: 0.3 }));
-    // Two cabinet legs
     g.add(new Konva.Rect({ x: x+20, y: y+40, width: 12, height: 8, fill: '#aaaaaa', stroke: '#888888', strokeWidth: 0.5 }));
     g.add(new Konva.Rect({ x: x+118, y: y+40, width: 12, height: 8, fill: '#aaaaaa', stroke: '#888888', strokeWidth: 0.5 }));
     layer.add(g);
@@ -268,11 +274,8 @@ function addFixture(layer: Konva.Layer, fixture: PlacedFixture) {
     layer.add(g);
   } else if (t === 'coffee_table') {
     const g = new Konva.Group();
-    // Outer frame
     g.add(new Konva.Rect({ x, y, width: 90, height: 50, fill: '#f5f0e8', stroke: '#111111', strokeWidth: 1.5, cornerRadius: 2 }));
-    // Glass top inset
     g.add(new Konva.Rect({ x: x+6, y: y+6, width: 78, height: 38, fill: '#fafaf5', stroke: '#cccccc', strokeWidth: 0.8, cornerRadius: 1 }));
-    // 4 corner leg dots
     [[x+5,y+5],[x+83,y+5],[x+5,y+43],[x+83,y+43]].forEach(([lx,ly]) =>
       g.add(new Konva.Circle({ x: lx, y: ly, radius: 3, fill: '#aaaaaa', stroke: '#888888', strokeWidth: 0.5 }))
     );
@@ -287,39 +290,35 @@ function addFixture(layer: Konva.Layer, fixture: PlacedFixture) {
   } else {
     const g = new Konva.Group();
     g.add(new Konva.Rect({ x, y, width: 50, height: 50, fill: '#f0f0f0', stroke: '#1a1a1a', strokeWidth: 1 }));
-    g.add(new Konva.Text({ x: x+2, y: y+18, text: (FIXTURE_LABELS[t] || t.replace(/_/g,' ')).slice(0,10), fontSize: 8, fill: '#555', width: 46, align: 'center' }));
+    g.add(new Konva.Text({
+      x: x+2, y: y+18, text: (FIXTURE_LABELS[t] || t.replace(/_/g,' ')).slice(0,10),
+      fontSize: 8, fill: '#555', width: 46, align: 'center',
+    }));
     layer.add(g);
   }
 }
 
-// ── Corner fill (covers wall junction gaps) ──────────────────────────────────
+// ── Corner fills ──────────────────────────────────────────────────────────────
 
-function fillCorners(layer: Konva.Layer, walls: Wall[], padding: number) {
-  const T = 15;
-  const corners: Array<{x: number; y: number}> = [];
-  const north = walls.find(w => w.side === 'north');
-  const south = walls.find(w => w.side === 'south');
-  if (north) { corners.push(north.start); corners.push(north.end); }
-  if (south) { corners.push(south.start); corners.push(south.end); }
-  corners.forEach(corner => {
-    layer.add(new Konva.Rect({
-      x: corner.x + padding - T / 2 - 1,
-      y: corner.y + padding - T / 2 - 1,
-      width: T + 2, height: T + 2,
-      fill: '#cccccc', strokeWidth: 0,
-    }));
+function fillCorners(layer: Konva.Layer, walls: Wall[]) {
+  const seen = new Set<string>();
+  walls.forEach(wall => {
+    [wall.start, wall.end].forEach(corner => {
+      const key = `${corner.x},${corner.y}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      layer.add(new Konva.Rect({
+        x: corner.x + PAD - WALL_T / 2 - 1,
+        y: corner.y + PAD - WALL_T / 2 - 1,
+        width: WALL_T + 2, height: WALL_T + 2,
+        fill: '#cccccc', strokeWidth: 0,
+      }));
+    });
   });
 }
 
 function addFixtureLabel(layer: Konva.Layer, fixture: PlacedFixture) {
-  const dims: Record<string, { w: number; h: number }> = {
-    sink:{w:60,h:50}, toilet:{w:40,h:70}, bathtub:{w:80,h:180},
-    shower:{w:90,h:90}, stove:{w:60,h:60}, fridge:{w:60,h:65},
-    dishwasher:{w:60,h:60}, desk:{w:120,h:60}, bed:{w:160,h:200},
-    wardrobe:{w:120,h:60}, sofa:{w:200,h:90}, tv_unit:{w:150,h:45},
-    bookshelf:{w:80,h:30},
-  };
-  const d = dims[fixture.type] || { w: 50, h: 50 };
+  const d = FIXTURE_DIMS[fixture.type] || { w: 50, h: 50 };
   const cx = fixture.position.x + PAD + d.w / 2;
   const cy = fixture.position.y + PAD + d.h / 2 + 2;
   const fontSize = d.w < 60 ? 7 : 8;
@@ -330,62 +329,53 @@ function addFixtureLabel(layer: Konva.Layer, fixture: PlacedFixture) {
   }));
 }
 
-// ── Windows (GOST: 3 parallel lines spanning full wall thickness) ─────────────
+// ── Windows (GOST 21.205-93: 3 parallel lines) ───────────────────────────────
 
 function addWindow(
   layer: Konva.Layer,
   win: WindowSpec & { _roomOffsetX?: number; _roomOffsetY?: number },
   walls: Wall[],
-  allWindows: WindowSpec[],
+  allWallWindows: WindowSpec[], // only windows on same wall
 ) {
-  const wallId = win.wallId;
-  const roomOffsetX = win._roomOffsetX;
-  const roomOffsetY = win._roomOffsetY;
-
-  let wall: Wall | undefined;
-  if (wallId) wall = walls.find(w => w.id === wallId);
-  if (!wall && roomOffsetX !== undefined && roomOffsetY !== undefined) {
-    wall = walls.find(w => {
-      if (w.side !== win.wall) return false;
-      const minX = Math.min(w.start.x, w.end.x);
-      const minY = Math.min(w.start.y, w.end.y);
-      const maxX = Math.max(w.start.x, w.end.x);
-      const maxY = Math.max(w.start.y, w.end.y);
-      return minX >= roomOffsetX - 10 && minY >= roomOffsetY - 10 &&
-             maxX <= roomOffsetX + 1500 && maxY <= roomOffsetY + 1500;
-    });
-  }
-  if (!wall) wall = walls.find(w => w.side === win.wall);
+  const wall = resolveWall(win.wall, win.wallId, win._roomOffsetX, win._roomOffsetY, walls);
   if (!wall) return;
 
-  const winWidth = (win.width || 1.2) * 100;
+  const winWidth = (win.width || 1.2) * UNITS_PER_METER;
   const T = wall.thickness;
   const wallStartX = wall.start.x + PAD;
   const wallStartY = wall.start.y + PAD;
-  const wallEndX   = wall.end.x + PAD;
-  const wallEndY   = wall.end.y + PAD;
-
-  const sameWall = allWindows.filter(w =>
-    w.wall === win.wall && (!(w as typeof win).wallId || (w as typeof win).wallId === win.wallId)
-  );
-  const winIndex = sameWall.findIndex(w => w.id === win.id);
-  const winCount = sameWall.length;
+  const wallEndX   = wall.end.x   + PAD;
+  const wallEndY   = wall.end.y   + PAD;
 
   const isHorizontal = win.wall === 'north' || win.wall === 'south';
   let centerX: number, centerY: number;
-  if (isHorizontal) {
-    const seg = (wallEndX - wallStartX) / (winCount + 1);
-    centerX = wallStartX + seg * (winIndex + 1);
-    centerY = (wallStartY + wallEndY) / 2;
+
+  if (win.offsetFromCorner !== undefined) {
+    // Explicit position: offset from wall's west/north corner
+    const off = win.offsetFromCorner * UNITS_PER_METER + winWidth / 2;
+    if (isHorizontal) {
+      centerX = wallStartX + off;
+      centerY = (wallStartY + wallEndY) / 2;
+    } else {
+      centerX = (wallStartX + wallEndX) / 2;
+      centerY = wallStartY + off;
+    }
   } else {
-    const seg = (wallEndY - wallStartY) / (winCount + 1);
-    centerX = (wallStartX + wallEndX) / 2;
-    centerY = wallStartY + seg * (winIndex + 1);
+    // Auto-space evenly
+    const idx   = allWallWindows.findIndex(w => w.id === win.id);
+    const count = allWallWindows.length;
+    if (isHorizontal) {
+      const seg = (wallEndX - wallStartX) / (count + 1);
+      centerX = wallStartX + seg * (idx + 1);
+      centerY = (wallStartY + wallEndY) / 2;
+    } else {
+      const seg = (wallEndY - wallStartY) / (count + 1);
+      centerX = (wallStartX + wallEndX) / 2;
+      centerY = wallStartY + seg * (idx + 1);
+    }
   }
 
   const halfW = winWidth / 2;
-  // Wall outer/inner face coords for the window opening
-  // Extend slightly beyond wall faces for visibility
   const ext = 3;
   let x1: number, y1: number, x2: number, y2: number;
   if (win.wall === 'north') {
@@ -403,17 +393,12 @@ function addWindow(
   }
 
   const g = new Konva.Group();
-  // White out wall opening
   g.add(new Konva.Rect({ x: x1, y: y1, width: x2 - x1, height: y2 - y1, fill: 'white' }));
-
-  // GOST 21.205-93: 3 parallel black lines at outer face, center, inner face
   if (isHorizontal) {
-    // Lines span window width, at y1 (outer), mid, y2 (inner)
     g.add(new Konva.Line({ points: [x1, y1, x2, y1], stroke: '#1a1a1a', strokeWidth: 1.2 }));
     g.add(new Konva.Line({ points: [x1, (y1+y2)/2, x2, (y1+y2)/2], stroke: '#1a1a1a', strokeWidth: 2 }));
     g.add(new Konva.Line({ points: [x1, y2, x2, y2], stroke: '#1a1a1a', strokeWidth: 1.2 }));
   } else {
-    // Lines span window height, at x1 (outer), mid, x2 (inner)
     g.add(new Konva.Line({ points: [x1, y1, x1, y2], stroke: '#1a1a1a', strokeWidth: 1.2 }));
     g.add(new Konva.Line({ points: [(x1+x2)/2, y1, (x1+x2)/2, y2], stroke: '#1a1a1a', strokeWidth: 2 }));
     g.add(new Konva.Line({ points: [x2, y1, x2, y2], stroke: '#1a1a1a', strokeWidth: 1.2 }));
@@ -421,107 +406,175 @@ function addWindow(
   layer.add(g);
 }
 
-// ── Doors (gap + leaf perpendicular to wall + dashed arc) ────────────────────
+// ── Wall resolver — shared by door and window ─────────────────────────────────
 
-function addDoor(layer: Konva.Layer, door: DoorSpec & { _roomOffsetX?: number; _roomOffsetY?: number }, walls: Wall[]) {
-  const wallId = door.wallId;
-  const roomOffsetX = door._roomOffsetX;
-  const roomOffsetY = door._roomOffsetY;
-
-  let wall: Wall | undefined;
-  if (wallId) wall = walls.find(w => w.id === wallId);
-  if (!wall && roomOffsetX !== undefined && roomOffsetY !== undefined) {
-    wall = walls.find(w => {
-      if (w.side !== door.wall) return false;
+function resolveWall(
+  side: string,
+  wallId: string | undefined,
+  offsetX: number | undefined,
+  offsetY: number | undefined,
+  walls: Wall[],
+): Wall | undefined {
+  if (wallId) {
+    const found = walls.find(w => w.id === wallId);
+    if (found) return found;
+  }
+  if (offsetX !== undefined && offsetY !== undefined) {
+    // Find wall matching side that starts near the room offset
+    const found = walls.find(w => {
+      if (w.side !== side) return false;
       const minX = Math.min(w.start.x, w.end.x);
       const minY = Math.min(w.start.y, w.end.y);
-      const maxX = Math.max(w.start.x, w.end.x);
-      const maxY = Math.max(w.start.y, w.end.y);
-      return minX >= roomOffsetX - 10 && minY >= roomOffsetY - 10 &&
-             maxX <= roomOffsetX + 1500 && maxY <= roomOffsetY + 1500;
+      return Math.abs(minX - offsetX) < 20 && Math.abs(minY - offsetY) < 20;
     });
+    if (found) return found;
   }
-  if (!wall) wall = walls.find(w => w.side === door.wall);
+  // Fallback: first wall with matching side
+  return walls.find(w => w.side === side);
+}
+
+// ── Doors (gap + leaf + bezier swing arc, GOST 21.205-93) ────────────────────
+
+function addDoor(
+  layer: Konva.Layer,
+  door: DoorSpec & { _roomOffsetX?: number; _roomOffsetY?: number },
+  walls: Wall[],
+  allWallDoors: DoorSpec[], // only doors on same wall
+) {
+  const wall = resolveWall(door.wall, door.wallId, door._roomOffsetX, door._roomOffsetY, walls);
   if (!wall) return;
 
-  const dw = (door.width || 0.9) * 100;
-  const T  = wall.thickness;
-  const wallStartX = wall.start.x + PAD;
-  const wallStartY = wall.start.y + PAD;
-  const wallEndX   = wall.end.x + PAD;
-  const wallEndY   = wall.end.y + PAD;
-  const midX = (wallStartX + wallEndX) / 2;
-  const midY = (wallStartY + wallEndY) / 2;
+  const dw   = (door.width || 0.9) * UNITS_PER_METER;
+  const T    = wall.thickness;
   const side = door.wall;
 
-  // Wall center line Y or X
-  const wallCY = (wallStartY + wallEndY) / 2;
-  const wallCX = (wallStartX + wallEndX) / 2;
+  const wallStartX = wall.start.x + PAD;
+  const wallStartY = wall.start.y + PAD;
+  const wallEndX   = wall.end.x   + PAD;
+  const wallEndY   = wall.end.y   + PAD;
 
-  // Opening: centered on wall midpoint, spans door width along wall
-  // Gap rect covers full wall thickness
+  // Door center position along wall
+  let centerX: number, centerY: number;
+  const isHorizontal = side === 'north' || side === 'south';
+
+  if (door.offsetFromCorner !== undefined) {
+    const off = door.offsetFromCorner * UNITS_PER_METER + dw / 2;
+    if (isHorizontal) {
+      centerX = wallStartX + off;
+      centerY = (wallStartY + wallEndY) / 2;
+    } else {
+      centerX = (wallStartX + wallEndX) / 2;
+      centerY = wallStartY + off;
+    }
+  } else {
+    // Evenly space multiple doors
+    const idx   = allWallDoors.findIndex(d => d.id === door.id);
+    const count = allWallDoors.length;
+    if (isHorizontal) {
+      const seg = (wallEndX - wallStartX) / (count + 1);
+      centerX = wallStartX + seg * (idx + 1);
+      centerY = (wallStartY + wallEndY) / 2;
+    } else {
+      const seg = (wallEndY - wallStartY) / (count + 1);
+      centerX = (wallStartX + wallEndX) / 2;
+      centerY = wallStartY + seg * (idx + 1);
+    }
+  }
+
+  // hinge: 'left' (default) = pivot at west/north end of opening
+  //        'right'           = pivot at east/south end of opening
+  const hinge = door.hinge ?? 'left';
+
   let gapX: number, gapY: number, gapW: number, gapH: number;
   let pivotX: number, pivotY: number;
-  let leafX: number, leafY: number;
+  let leafX: number,  leafY: number;
 
   if (side === 'north') {
-    gapX = midX - dw / 2; gapY = wallCY - T / 2; gapW = dw; gapH = T;
-    // Pivot: inner face (bottom), left. Leaf: perpendicular INTO room (down), length=dw
-    pivotX = gapX;        pivotY = wallCY + T / 2;
-    leafX  = pivotX;      leafY  = pivotY + dw;
+    gapX = centerX - dw / 2; gapY = centerY - T / 2; gapW = dw; gapH = T;
+    if (hinge === 'left') {
+      pivotX = gapX;        pivotY = centerY + T / 2; // inner face, west end
+      leafX  = pivotX;      leafY  = pivotY + dw;     // swings down-right
+    } else {
+      pivotX = gapX + dw;   pivotY = centerY + T / 2; // inner face, east end
+      leafX  = pivotX;      leafY  = pivotY + dw;     // swings down-left (mirrored below)
+    }
   } else if (side === 'south') {
-    gapX = midX - dw / 2; gapY = wallCY - T / 2; gapW = dw; gapH = T;
-    // Pivot: inner face (top), right. Leaf: perpendicular INTO room (up), length=dw
-    pivotX = gapX + dw;   pivotY = wallCY - T / 2;
-    leafX  = pivotX;      leafY  = pivotY - dw;
+    gapX = centerX - dw / 2; gapY = centerY - T / 2; gapW = dw; gapH = T;
+    if (hinge === 'right') {
+      pivotX = gapX;        pivotY = centerY - T / 2;
+      leafX  = pivotX;      leafY  = pivotY - dw;
+    } else {
+      pivotX = gapX + dw;   pivotY = centerY - T / 2;
+      leafX  = pivotX;      leafY  = pivotY - dw;
+    }
   } else if (side === 'east') {
-    gapX = wallCX - T / 2; gapY = midY - dw / 2; gapW = T; gapH = dw;
-    // Pivot: inner face (left), top. Leaf: perpendicular INTO room (left), length=dw
-    pivotX = wallCX - T / 2; pivotY = gapY;
-    leafX  = pivotX - dw;    leafY  = pivotY;
-  } else {
-    gapX = wallCX - T / 2; gapY = midY - dw / 2; gapW = T; gapH = dw;
-    // Pivot: inner face (right), top. Leaf: perpendicular INTO room (right), length=dw
-    pivotX = wallCX + T / 2; pivotY = gapY;
-    leafX  = pivotX + dw;    leafY  = pivotY;
+    gapX = centerX - T / 2; gapY = centerY - dw / 2; gapW = T; gapH = dw;
+    if (hinge === 'left') {
+      pivotX = centerX - T / 2; pivotY = gapY;
+      leafX  = pivotX - dw;     leafY  = pivotY;
+    } else {
+      pivotX = centerX - T / 2; pivotY = gapY + dw;
+      leafX  = pivotX - dw;     leafY  = pivotY;
+    }
+  } else { // west
+    gapX = centerX - T / 2; gapY = centerY - dw / 2; gapW = T; gapH = dw;
+    if (hinge === 'left') {
+      pivotX = centerX + T / 2; pivotY = gapY;
+      leafX  = pivotX + dw;     leafY  = pivotY;
+    } else {
+      pivotX = centerX + T / 2; pivotY = gapY + dw;
+      leafX  = pivotX + dw;     leafY  = pivotY;
+    }
+  }
+
+  // Cubic bezier quarter-circle approximation (kappa = 0.5523)
+  const kappa = 0.5523;
+  let arcPoints: number[];
+
+  if (side === 'north') {
+    if (hinge === 'left') {
+      arcPoints = [leafX, leafY, leafX + dw*kappa, leafY, pivotX+dw, pivotY+dw*(1-kappa), pivotX+dw, pivotY];
+    } else {
+      arcPoints = [leafX, leafY, leafX - dw*kappa, leafY, pivotX-dw, pivotY+dw*(1-kappa), pivotX-dw, pivotY];
+    }
+  } else if (side === 'south') {
+    if (hinge === 'right') {
+      arcPoints = [leafX, leafY, leafX + dw*kappa, leafY, pivotX+dw, pivotY-dw*(1-kappa), pivotX+dw, pivotY];
+    } else {
+      arcPoints = [leafX, leafY, leafX - dw*kappa, leafY, pivotX-dw, pivotY-dw*(1-kappa), pivotX-dw, pivotY];
+    }
+  } else if (side === 'east') {
+    if (hinge === 'left') {
+      arcPoints = [leafX, leafY, leafX, leafY+dw*kappa, pivotX-dw*(1-kappa), pivotY+dw, pivotX, pivotY+dw];
+    } else {
+      arcPoints = [leafX, leafY, leafX, leafY-dw*kappa, pivotX-dw*(1-kappa), pivotY-dw, pivotX, pivotY-dw];
+    }
+  } else { // west
+    if (hinge === 'left') {
+      arcPoints = [leafX, leafY, leafX, leafY+dw*kappa, pivotX+dw*(1-kappa), pivotY+dw, pivotX, pivotY+dw];
+    } else {
+      arcPoints = [leafX, leafY, leafX, leafY-dw*kappa, pivotX+dw*(1-kappa), pivotY-dw, pivotX, pivotY-dw];
+    }
   }
 
   const g = new Konva.Group();
   g.add(new Konva.Rect({ x: gapX, y: gapY, width: gapW, height: gapH, fill: 'white' }));
-  // Swing arc first (behind leaf)
-  const kappa = 0.5523;
-  let arcPoints: number[];
-  if (side === 'north') {
-    // Pivot bottom-left, leaf goes DOWN. Arc from leaf tip to wall face (right of pivot)
-    arcPoints = [leafX, leafY, leafX + dw * kappa, leafY, pivotX + dw, pivotY + dw * (1 - kappa), pivotX + dw, pivotY];
-  } else if (side === 'south') {
-    // Pivot top-right, leaf goes UP. Arc from leaf tip to wall face (left of pivot)
-    arcPoints = [leafX, leafY, leafX - dw * kappa, leafY, pivotX - dw, pivotY - dw * (1 - kappa), pivotX - dw, pivotY];
-  } else if (side === 'east') {
-    // Pivot top-left, leaf goes LEFT. Arc from leaf tip to wall face (below pivot)
-    arcPoints = [leafX, leafY, leafX, leafY + dw * kappa, pivotX - dw * (1 - kappa), pivotY + dw, pivotX, pivotY + dw];
-  } else {
-    // Pivot top-right, leaf goes RIGHT. Arc from leaf tip to wall face (below pivot)
-    arcPoints = [leafX, leafY, leafX, leafY + dw * kappa, pivotX + dw * (1 - kappa), pivotY + dw, pivotX, pivotY + dw];
-  }
   g.add(new Konva.Line({ points: arcPoints, bezier: true, stroke: '#555555', strokeWidth: 1, dash: [4, 3] }));
-  // Door leaf on top (drawn last = highest z-order)
   g.add(new Konva.Line({ points: [pivotX, pivotY, leafX, leafY], stroke: '#000000', strokeWidth: 3 }));
   layer.add(g);
 }
 
-// ── Dimension lines (tick-mark style, offset outside) ────────────────────────
+// ── Dimension lines ───────────────────────────────────────────────────────────
 
 function addDimension(layer: Konva.Layer, dim: DimensionLine, totalW: number, totalH: number, minX = 0, minY = 0) {
+  if (dim.value === 0) return; // room labels handled separately
+
   const startX = dim.start.x + PAD;
   const startY = dim.start.y + PAD;
-  const endX   = dim.end.x + PAD;
-  const endY   = dim.end.y + PAD;
-  const midX = (startX + endX) / 2;
-  const midY = (startY + endY) / 2;
-
-  // Room label (value === 0) — rendered by addRoomBackgrounds, skip here
-  if (dim.value === 0) return;
+  const endX   = dim.end.x   + PAD;
+  const endY   = dim.end.y   + PAD;
+  const midX   = (startX + endX) / 2;
+  const midY   = (startY + endY) / 2;
 
   const dx = endX - startX;
   const dy = endY - startY;
@@ -530,62 +583,29 @@ function addDimension(layer: Konva.Layer, dim: DimensionLine, totalW: number, to
 
   const ux = dx / len;
   const uy = dy / len;
+  let nx = -uy;
+  let ny =  ux;
 
-  // Determine outward normal based on wall position relative to room center
   const roomCX = PAD + minX + totalW / 2;
   const roomCY = PAD + minY + totalH / 2;
+  if (nx * (roomCX - midX) + ny * (roomCY - midY) > 0) { nx = -nx; ny = -ny; }
 
-  // Raw perpendicular (left of direction)
-  let nx = -uy;
-  let ny = ux;
-
-  // Vector from wall midpoint to room center
-  const toCenterX = roomCX - midX;
-  const toCenterY = roomCY - midY;
-
-  // If normal points toward center, flip it (we want outward)
-  if (nx * toCenterX + ny * toCenterY > 0) {
-    nx = -nx;
-    ny = -ny;
-  }
-
-  // Offset dimension line points (outside the wall)
-  // Clamp to ensure dim line stays within canvas (min y=30 for north, etc.)
   const ax = startX + nx * DIM_OFFSET;
   const ay = Math.max(30, startY + ny * DIM_OFFSET);
   const bx = endX   + nx * DIM_OFFSET;
   const by = Math.max(30, endY   + ny * DIM_OFFSET);
 
-  // Main dimension line
   layer.add(new Konva.Line({ points: [ax, ay, bx, by], stroke: '#555555', strokeWidth: 0.8 }));
+  layer.add(new Konva.Line({ points: [startX, startY, startX + nx*(DIM_OFFSET+DIM_EXT), startY + ny*(DIM_OFFSET+DIM_EXT)], stroke: '#555555', strokeWidth: 0.8 }));
+  layer.add(new Konva.Line({ points: [endX,   endY,   endX   + nx*(DIM_OFFSET+DIM_EXT), endY   + ny*(DIM_OFFSET+DIM_EXT)], stroke: '#555555', strokeWidth: 0.8 }));
 
-  // Extension lines from wall face to 10u past dim line
-  layer.add(new Konva.Line({
-    points: [startX, startY, startX + nx * (DIM_OFFSET + DIM_EXT), startY + ny * (DIM_OFFSET + DIM_EXT)],
-    stroke: '#555555', strokeWidth: 0.8,
-  }));
-  layer.add(new Konva.Line({
-    points: [endX, endY, endX + nx * (DIM_OFFSET + DIM_EXT), endY + ny * (DIM_OFFSET + DIM_EXT)],
-    stroke: '#555555', strokeWidth: 0.8,
-  }));
-
-  // 45° tick marks at each end of dimension line
   const half = TICK_SIZE / 2;
-  layer.add(new Konva.Line({
-    points: [ax - ux * half - nx * half, ay - uy * half - ny * half,
-             ax + ux * half + nx * half, ay + uy * half + ny * half],
-    stroke: '#333333', strokeWidth: 1.2,
-  }));
-  layer.add(new Konva.Line({
-    points: [bx - ux * half - nx * half, by - uy * half - ny * half,
-             bx + ux * half + nx * half, by + uy * half + ny * half],
-    stroke: '#333333', strokeWidth: 1.2,
-  }));
+  layer.add(new Konva.Line({ points: [ax - ux*half - nx*half, ay - uy*half - ny*half, ax + ux*half + nx*half, ay + uy*half + ny*half], stroke: '#333333', strokeWidth: 1.2 }));
+  layer.add(new Konva.Line({ points: [bx - ux*half - nx*half, by - uy*half - ny*half, bx + ux*half + nx*half, by + uy*half + ny*half], stroke: '#333333', strokeWidth: 1.2 }));
 
-  // Text centered outside dim line
   layer.add(new Konva.Text({
-    x: midX + nx * (DIM_OFFSET + 6) - 22,
-    y: midY + ny * (DIM_OFFSET + 6) - 6,
+    x: midX + nx*(DIM_OFFSET+6) - 22,
+    y: midY + ny*(DIM_OFFSET+6) - 6,
     text: dim.label,
     fontSize: 9.5, fontFamily: 'Arial', fill: '#111111', width: 44, align: 'center',
   }));
@@ -593,46 +613,151 @@ function addDimension(layer: Konva.Layer, dim: DimensionLine, totalW: number, to
 
 // ── Room backgrounds + labels ─────────────────────────────────────────────────
 
-function addRoomBackgrounds(layer: Konva.Layer, drawingData: DrawingData) {
-  if (drawingData.walls.length <= 4) return;
-  drawingData.dimensions
-    .filter(d => d.id.startsWith('label-'))
-    .forEach(d => {
-      const cx = d.start.x + PAD;
-      const cy = (d.start.y + d.end.y) / 2 + PAD;
-      const label = d.label.toLowerCase();
-      let color = ROOM_COLORS.default;
-      if (/oshxona|kitchen/.test(label))        color = ROOM_COLORS.kitchen;
-      else if (/hammom|bathroom/.test(label))   color = ROOM_COLORS.bathroom;
-      else if (/yotoqxona|bedroom/.test(label)) color = ROOM_COLORS.bedroom;
-      else if (/zal|mehmonxona|living/.test(label)) color = ROOM_COLORS.living;
-      else if (/ofis|office/.test(label))       color = ROOM_COLORS.office;
-      else if (/koridor|hallway/.test(label))   color = ROOM_COLORS.hallway;
-      layer.add(new Konva.Circle({ x: cx, y: cy, radius: 40, fill: color, opacity: 0.5 }));
+function addRoomBackgrounds(layer: Konva.Layer, drawingData: DrawingData, totalW: number, totalH: number, minX: number, minY: number) {
+  const isMultiRoom = drawingData.dimensions.some(d => d.id.startsWith('label-'));
 
-      // Professional 2-line room label: name (bold) + area
-      // label format: "Hammom 12.0m²"
-      const parts = d.label.match(/^(.+?)\s+([\d.]+m²)$/);
-      const roomName = parts ? parts[1] : d.label;
-      const roomArea = parts ? parts[2] : '';
-      layer.add(new Konva.Text({
-        x: cx - 50, y: cy - 12,
-        text: roomName,
-        fontSize: 10, fontStyle: 'bold', fontFamily: 'Arial',
-        fill: '#111111', width: 100, align: 'center',
-      }));
-      if (roomArea) {
-        layer.add(new Konva.Text({
-          x: cx - 50, y: cy + 3,
-          text: roomArea,
-          fontSize: 9, fontFamily: 'Arial',
-          fill: '#333333', width: 100, align: 'center',
-        }));
-      }
-    });
+  if (isMultiRoom) {
+    // Multi-room: draw colored circles + 2-line labels from dimension data
+    drawingData.dimensions
+      .filter(d => d.id.startsWith('label-'))
+      .forEach(d => {
+        const cx = d.start.x + PAD;
+        const cy = (d.start.y + d.end.y) / 2 + PAD;
+        const color = roomColorFromName(d.label);
+        layer.add(new Konva.Circle({ x: cx, y: cy, radius: 40, fill: color, opacity: 0.5 }));
+        const parts = d.label.match(/^(.+?)\s+([\d.]+m²)$/);
+        const roomName = parts ? parts[1] : d.label;
+        const roomArea = parts ? parts[2] : '';
+        layer.add(new Konva.Text({ x: cx-50, y: cy-12, text: roomName, fontSize: 10, fontStyle: 'bold', fontFamily: 'Arial', fill: '#111111', width: 100, align: 'center' }));
+        if (roomArea) layer.add(new Konva.Text({ x: cx-50, y: cy+3, text: roomArea, fontSize: 9, fontFamily: 'Arial', fill: '#333333', width: 100, align: 'center' }));
+      });
+  } else {
+    // Single room: color from roomName or fixtures
+    const color = drawingData.roomName
+      ? roomColorFromName(drawingData.roomName)
+      : roomColorFromFixtures(drawingData.fixtures);
+
+    const rx = PAD + minX;
+    const ry = PAD + minY;
+
+    // Tinted room fill (inside walls)
+    layer.add(new Konva.Rect({
+      x: rx + WALL_T, y: ry + WALL_T,
+      width: totalW - WALL_T * 2, height: totalH - WALL_T * 2,
+      fill: color, opacity: 0.6,
+    }));
+
+    // Room name label
+    const name = drawingData.roomName ? drawingData.roomName.charAt(0).toUpperCase() + drawingData.roomName.slice(1) : 'Xona';
+    const area = ((totalW / UNITS_PER_METER) * (totalH / UNITS_PER_METER)).toFixed(1);
+    layer.add(new Konva.Text({ x: rx + totalW/2 - 50, y: ry + totalH/2 - 12, text: name, fontSize: 10, fontStyle: 'bold', fontFamily: 'Arial', fill: '#111111', width: 100, align: 'center' }));
+    layer.add(new Konva.Text({ x: rx + totalW/2 - 50, y: ry + totalH/2 + 3,  text: `${area}m²`,  fontSize: 9,  fontFamily: 'Arial', fill: '#333333', width: 100, align: 'center' }));
+  }
 }
 
-// ── Title block (GOST shtamp 220x80) ─────────────────────────────────────────
+// ── Staircase (GOST hatching — diagonal lines in box) ────────────────────────
+
+function addStaircase(layer: Konva.Layer, spec: StaircaseSpec) {
+  const x  = spec.position.x * UNITS_PER_METER + PAD;
+  const y  = spec.position.y * UNITS_PER_METER + PAD;
+  const w  = spec.width  * UNITS_PER_METER;
+  const h  = spec.length * UNITS_PER_METER;
+
+  // Outer box
+  layer.add(new Konva.Rect({ x, y, width: w, height: h, fill: '#f0f0f0', stroke: '#333', strokeWidth: 1.5 }));
+
+  // Diagonal hatch lines (GOST staircase symbol)
+  const step = 8;
+  for (let i = -h; i < w + h; i += step) {
+    const x1 = Math.max(x, x + i);
+    const y1 = i < 0 ? y - i : y;
+    const x2 = Math.min(x + w, x + i + h);
+    const y2 = i < 0 ? y + h : y + h - i;
+    if (x2 <= x || y2 <= y || x1 >= x + w || y1 >= y + h) continue;
+    layer.add(new Konva.Line({ points: [x1, y1, x2, y2], stroke: '#888', strokeWidth: 0.6, opacity: 0.7 }));
+  }
+
+  // Arrow showing direction (going up)
+  const arrowX = x + w / 2;
+  layer.add(new Konva.Arrow({
+    points: [arrowX, y + h - 6, arrowX, y + 6],
+    stroke: '#333', fill: '#333', strokeWidth: 1.2, pointerLength: 5, pointerWidth: 4,
+  }));
+
+  // Label
+  layer.add(new Konva.Text({
+    x: x + 2, y: y + h / 2 - 8,
+    text: 'Zinapoya', fontSize: 7, fontFamily: 'Arial',
+    fill: '#333', width: w - 4, align: 'center', rotation: 0,
+  }));
+  layer.add(new Konva.Text({
+    x: x + 2, y: y + h / 2 + 2,
+    text: `${spec.flightCount}-qavat`, fontSize: 6, fontFamily: 'Arial',
+    fill: '#666', width: w - 4, align: 'center',
+  }));
+}
+
+// ── Inter-room door (shared wall opening, no swing arc — just gap + leaf) ────
+
+function addInterRoomDoor(layer: Konva.Layer, ird: InterRoomDoor, walls: Wall[]) {
+  const wall = walls.find(w => w.id === ird.wallId);
+  if (!wall) return;
+
+  const dw  = ird.width * UNITS_PER_METER;
+  const T   = wall.thickness;
+  const isH = wall.side === 'north' || wall.side === 'south';
+
+  const wsx = wall.start.x + PAD, wsy = wall.start.y + PAD;
+  const wex = wall.end.x   + PAD, wey = wall.end.y   + PAD;
+
+  // Door center: offsetFromCorner from wall start
+  const off = ird.offsetFromCorner * UNITS_PER_METER + dw / 2;
+  let cx: number, cy: number;
+  if (isH) {
+    cx = wsx + off;
+    cy = (wsy + wey) / 2;
+  } else {
+    cx = (wsx + wex) / 2;
+    cy = wsy + off;
+  }
+
+  let gapX: number, gapY: number, gapW: number, gapH: number;
+  if (isH) {
+    gapX = cx - dw / 2; gapY = cy - T / 2; gapW = dw; gapH = T;
+  } else {
+    gapX = cx - T / 2; gapY = cy - dw / 2; gapW = T; gapH = dw;
+  }
+
+  const g = new Konva.Group();
+  // White gap in wall
+  g.add(new Konva.Rect({ x: gapX, y: gapY, width: gapW, height: gapH, fill: 'white' }));
+  // Double line showing inter-room door threshold (no swing — passage only)
+  const inset = 2;
+  if (isH) {
+    g.add(new Konva.Line({ points: [gapX + inset, gapY, gapX + inset, gapY + gapH], stroke: '#555', strokeWidth: 1 }));
+    g.add(new Konva.Line({ points: [gapX + gapW - inset, gapY, gapX + gapW - inset, gapY + gapH], stroke: '#555', strokeWidth: 1 }));
+  } else {
+    g.add(new Konva.Line({ points: [gapX, gapY + inset, gapX + gapW, gapY + inset], stroke: '#555', strokeWidth: 1 }));
+    g.add(new Konva.Line({ points: [gapX, gapY + gapH - inset, gapX + gapW, gapY + gapH - inset], stroke: '#555', strokeWidth: 1 }));
+  }
+  layer.add(g);
+}
+
+// ── Floor label (level mark ±0.000) ──────────────────────────────────────────
+
+function addFloorLabel(layer: Konva.Layer, floorLabel: string, elevation: number, totalW: number) {
+  const elevStr = elevation >= 0 ? `+${elevation.toFixed(3)}` : elevation.toFixed(3);
+  const g = new Konva.Group();
+  // Top-right corner badge
+  const bx = PAD + totalW + 10;
+  const by = PAD - 30;
+  g.add(new Konva.Rect({ x: bx, y: by, width: 90, height: 26, fill: '#1e293b', cornerRadius: 4 }));
+  g.add(new Konva.Text({ x: bx + 4, y: by + 3,  text: floorLabel, fontSize: 10, fontStyle: 'bold', fontFamily: 'Arial', fill: '#f8fafc' }));
+  g.add(new Konva.Text({ x: bx + 4, y: by + 14, text: `ur. ${elevStr}`, fontSize: 8, fontFamily: 'Arial', fill: '#94a3b8' }));
+  layer.add(g);
+}
+
+// ── Title block ───────────────────────────────────────────────────────────────
 
 function addTitleBlock(layer: Konva.Layer, totalWidth: number, totalHeight: number) {
   const blockW = 220, blockH = 80;
@@ -641,50 +766,33 @@ function addTitleBlock(layer: Konva.Layer, totalWidth: number, totalHeight: numb
   const date = new Date().toLocaleDateString('uz-UZ');
 
   const g = new Konva.Group();
-  // Outer border
   g.add(new Konva.Rect({ x: blockX, y: blockY, width: blockW, height: blockH, stroke: '#1a1a1a', strokeWidth: 1.5, fill: 'white' }));
-  // Vertical divider at x+100
   g.add(new Konva.Line({ points: [blockX+100, blockY, blockX+100, blockY+blockH], stroke: '#1a1a1a', strokeWidth: 0.8 }));
+  [20, 40, 60].forEach(dy => g.add(new Konva.Line({ points: [blockX, blockY+dy, blockX+blockW, blockY+dy], stroke: '#1a1a1a', strokeWidth: 0.8 })));
 
-  // Row dividers (inner)
-  const rows = [20, 40, 60];
-  rows.forEach(dy => {
-    g.add(new Konva.Line({ points: [blockX, blockY+dy, blockX+blockW, blockY+dy], stroke: '#1a1a1a', strokeWidth: 0.8 }));
-  });
-
-  // Left column content
-  g.add(new Konva.Text({ x: blockX+4, y: blockY+4,  text: 'Loyiha nomi',    fontSize: 8, fontFamily: 'Arial', fill: '#555' }));
-  g.add(new Konva.Text({ x: blockX+4, y: blockY+24, text: 'Floor Plan',     fontSize: 10, fontFamily: 'Arial', fontStyle: 'bold', fill: '#1a1a1a' }));
-  g.add(new Konva.Text({ x: blockX+4, y: blockY+44, text: 'Masshtab',       fontSize: 8, fontFamily: 'Arial', fill: '#555' }));
-  g.add(new Konva.Text({ x: blockX+4, y: blockY+54, text: '1:50',           fontSize: 10, fontFamily: 'Arial', fontStyle: 'bold', fill: '#1a1a1a' }));
-  g.add(new Konva.Text({ x: blockX+4, y: blockY+64, text: 'SNiP 2.04.01-85', fontSize: 8, fontFamily: 'Arial', fill: '#555' }));
-
-  // Right column content
-  g.add(new Konva.Text({ x: blockX+104, y: blockY+4,  text: 'Sana',         fontSize: 8, fontFamily: 'Arial', fill: '#555' }));
-  g.add(new Konva.Text({ x: blockX+104, y: blockY+14, text: date,           fontSize: 9, fontFamily: 'Arial', fill: '#1a1a1a' }));
-  g.add(new Konva.Text({ x: blockX+104, y: blockY+44, text: 'Bosqich',      fontSize: 8, fontFamily: 'Arial', fill: '#555' }));
-  g.add(new Konva.Text({ x: blockX+104, y: blockY+54, text: 'РП',           fontSize: 10, fontFamily: 'Arial', fontStyle: 'bold', fill: '#1a1a1a' }));
-
+  g.add(new Konva.Text({ x: blockX+4, y: blockY+4,  text: 'Loyiha nomi',     fontSize: 8,  fontFamily: 'Arial', fill: '#555' }));
+  g.add(new Konva.Text({ x: blockX+4, y: blockY+24, text: 'Floor Plan',      fontSize: 10, fontFamily: 'Arial', fontStyle: 'bold', fill: '#1a1a1a' }));
+  g.add(new Konva.Text({ x: blockX+4, y: blockY+44, text: 'Masshtab',        fontSize: 8,  fontFamily: 'Arial', fill: '#555' }));
+  g.add(new Konva.Text({ x: blockX+4, y: blockY+54, text: '1:50',            fontSize: 10, fontFamily: 'Arial', fontStyle: 'bold', fill: '#1a1a1a' }));
+  g.add(new Konva.Text({ x: blockX+4, y: blockY+64, text: 'SNiP 2.04.01-85', fontSize: 8,  fontFamily: 'Arial', fill: '#555' }));
+  g.add(new Konva.Text({ x: blockX+104, y: blockY+4,  text: 'Sana',   fontSize: 8,  fontFamily: 'Arial', fill: '#555' }));
+  g.add(new Konva.Text({ x: blockX+104, y: blockY+14, text: date,     fontSize: 9,  fontFamily: 'Arial', fill: '#1a1a1a' }));
+  g.add(new Konva.Text({ x: blockX+104, y: blockY+44, text: 'Bosqich', fontSize: 8,  fontFamily: 'Arial', fill: '#555' }));
+  g.add(new Konva.Text({ x: blockX+104, y: blockY+54, text: 'РП',      fontSize: 10, fontFamily: 'Arial', fontStyle: 'bold', fill: '#1a1a1a' }));
   layer.add(g);
 }
 
-// ── Legend (bordered box) ─────────────────────────────────────────────────────
+// ── Legend ────────────────────────────────────────────────────────────────────
 
 function addLegend(layer: Konva.Layer, totalHeight: number) {
   const lx = PAD;
   const ly = totalHeight + PAD + 110;
-  const boxW = 165, boxH = 55;
-
   const g = new Konva.Group();
-  // Border box
-  g.add(new Konva.Rect({ x: lx, y: ly, width: boxW, height: boxH, fill: 'white', stroke: '#bbbbbb', strokeWidth: 0.8 }));
-  // Cold water
+  g.add(new Konva.Rect({ x: lx, y: ly, width: 165, height: 55, fill: 'white', stroke: '#bbbbbb', strokeWidth: 0.8 }));
   g.add(new Konva.Line({ points: [lx+8, ly+13, lx+33, ly+13], stroke: '#2563eb', strokeWidth: 2 }));
   g.add(new Konva.Text({ x: lx+38, y: ly+7,  text: 'Sovuq suv (H)',    fontSize: 9, fontFamily: 'Arial', fill: '#111111' }));
-  // Hot water
   g.add(new Konva.Line({ points: [lx+8, ly+29, lx+33, ly+29], stroke: '#dc2626', strokeWidth: 2 }));
   g.add(new Konva.Text({ x: lx+38, y: ly+23, text: 'Issiq suv (I)',     fontSize: 9, fontFamily: 'Arial', fill: '#111111' }));
-  // Drain
   g.add(new Konva.Line({ points: [lx+8, ly+45, lx+33, ly+45], stroke: '#64748b', strokeWidth: 1.5, dash: [6,4], opacity: 0.75 }));
   g.add(new Konva.Text({ x: lx+38, y: ly+39, text: 'Kanalizatsiya (K)', fontSize: 9, fontFamily: 'Arial', fill: '#111111' }));
   layer.add(g);
@@ -692,32 +800,80 @@ function addLegend(layer: Konva.Layer, totalHeight: number) {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
+const ZOOM_STEP = 1.18;
+const MIN_ZOOM  = 0.15;
+const MAX_ZOOM  = 10;
+
 const Canvas2D = forwardRef<Canvas2DHandle, Canvas2DProps>(
   function Canvas2D({ drawingData, width = 800, scale = 1 }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
-    const stageRef = useRef<Konva.Stage | null>(null);
+    const stageRef     = useRef<Konva.Stage | null>(null);
+    const zoomRef      = useRef(1);                   // mirror of zoom state for event handlers
+    const baseScaleRef = useRef(1);                   // initial fit-to-width scale
+    const [zoom, setZoomState] = useState(1);         // display only — NOT in useEffect deps
+
+    // Zoom helpers (stable refs — no re-render issues)
+    const applyZoom = useCallback((newZoom: number, pivotX?: number, pivotY?: number) => {
+      const stage = stageRef.current;
+      if (!stage) return;
+      const clamped = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
+      const bs = baseScaleRef.current;
+      const finalScale = bs * clamped;
+      if (pivotX !== undefined && pivotY !== undefined) {
+        const oldScale = stage.scaleX();
+        const ptX = (pivotX - stage.x()) / oldScale;
+        const ptY = (pivotY - stage.y()) / oldScale;
+        stage.scale({ x: finalScale, y: finalScale });
+        stage.position({ x: pivotX - ptX * finalScale, y: pivotY - ptY * finalScale });
+      } else {
+        stage.scale({ x: finalScale, y: finalScale });
+      }
+      stage.batchDraw();
+      zoomRef.current = clamped;
+      setZoomState(clamped);
+    }, []);
+
+    const zoomIn  = useCallback(() => applyZoom(zoomRef.current * ZOOM_STEP), [applyZoom]);
+    const zoomOut = useCallback(() => applyZoom(zoomRef.current / ZOOM_STEP), [applyZoom]);
+    const resetZoom = useCallback(() => {
+      const stage = stageRef.current;
+      if (!stage) return;
+      const bs = baseScaleRef.current;
+      stage.scale({ x: bs, y: bs });
+      stage.position({ x: 0, y: 0 });
+      stage.batchDraw();
+      zoomRef.current = 1;
+      setZoomState(1);
+    }, []);
 
     useImperativeHandle(ref, () => ({
       exportToPdf(filename = 'floorplan.pdf') {
         const stage = stageRef.current;
         if (!stage) return;
+        // Export at base scale (full resolution, not zoomed)
+        const savedScale = { x: stage.scaleX(), y: stage.scaleY() };
+        const savedPos   = { x: stage.x(),      y: stage.y()      };
+        const bs = baseScaleRef.current;
+        stage.scale({ x: bs, y: bs });
+        stage.position({ x: 0, y: 0 });
+        stage.batchDraw();
         const dataUrl = stage.toDataURL({ pixelRatio: 3 });
         const imgW = stage.width();
         const imgH = stage.height();
+        stage.scale(savedScale);
+        stage.position(savedPos);
+        stage.batchDraw();
         const orientation = imgW >= imgH ? 'landscape' : 'portrait';
         const pdf = new jsPDF({ orientation, unit: 'px', format: [imgW, imgH] });
         pdf.addImage(dataUrl, 'PNG', 0, 0, imgW, imgH);
         pdf.save(filename);
       },
-    }));
+      zoomIn, zoomOut, resetZoom,
+    }), [zoomIn, zoomOut, resetZoom]);
 
     useEffect(() => {
       if (!containerRef.current) return;
-
-      if (stageRef.current) {
-        stageRef.current.destroy();
-        stageRef.current = null;
-      }
+      if (stageRef.current) { stageRef.current.destroy(); stageRef.current = null; }
 
       const allX = drawingData.walls.flatMap(w => [w.start.x, w.end.x]);
       const allY = drawingData.walls.flatMap(w => [w.start.y, w.end.y]);
@@ -731,72 +887,91 @@ const Canvas2D = forwardRef<Canvas2DHandle, Canvas2DProps>(
       const autoScale = (width / contentWidth) * scale;
       const renderedHeight = Math.ceil(contentHeight * autoScale);
 
+      // Reset zoom on new drawing
+      zoomRef.current = 1;
+      baseScaleRef.current = autoScale;
+      setZoomState(1);
+
       const stage = new Konva.Stage({
-        container: containerRef.current,
-        width,
-        height: renderedHeight,
-        scaleX: autoScale,
-        scaleY: autoScale,
+        container: containerRef.current, width, height: renderedHeight,
+        scaleX: autoScale, scaleY: autoScale,
+        draggable: true,   // pan when zoomed
       });
       stageRef.current = stage;
+
+      // ── Wheel zoom (cursor-centered) ────────────────────────────────────────
+      const handleWheel = (e: WheelEvent) => {
+        e.preventDefault();
+        const factor = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+        const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, zoomRef.current * factor));
+        const ptr = stage.getPointerPosition() ?? { x: width / 2, y: renderedHeight / 2 };
+        const bs = baseScaleRef.current;
+        const oldScale = stage.scaleX();
+        const ptX = (ptr.x - stage.x()) / oldScale;
+        const ptY = (ptr.y - stage.y()) / oldScale;
+        const fs = bs * newZoom;
+        stage.scale({ x: fs, y: fs });
+        stage.position({ x: ptr.x - ptX * fs, y: ptr.y - ptY * fs });
+        stage.batchDraw();
+        zoomRef.current = newZoom;
+        setZoomState(newZoom);
+      };
+      stage.container().addEventListener('wheel', handleWheel, { passive: false });
 
       const layer = new Konva.Layer();
       stage.add(layer);
 
-      // 1. White room fill
-      layer.add(new Konva.Rect({
-        x: PAD + minX, y: PAD + minY,
-        width: totalWidth, height: totalHeight,
-        fill: 'white',
-      }));
+      // 1. White base
+      layer.add(new Konva.Rect({ x: PAD + minX, y: PAD + minY, width: totalWidth, height: totalHeight, fill: 'white' }));
 
       // 2. Room color backgrounds + labels
-      addRoomBackgrounds(layer, drawingData);
+      addRoomBackgrounds(layer, drawingData, totalWidth, totalHeight, minX, minY);
 
-      // Single-room label (no label- dims)
-      if (!drawingData.dimensions.some(d => d.id.startsWith('label-'))) {
-        layer.add(new Konva.Text({
-          x: PAD + minX + totalWidth / 2 - 50,
-          y: PAD + minY + totalHeight / 2 - 10,
-          text: 'Xona',
-          fontSize: 10, fontStyle: 'bold', fontFamily: 'Arial',
-          fill: '#111111', width: 100, align: 'center',
-        }));
-      }
-
-      // 3. Grid
+      // 3. Grid (aligned with room corners)
       addGrid(layer, width / autoScale, contentHeight);
 
-      // 4. Pipes (with directional arrow for hot/cold)
+      // 4. Pipes
       (drawingData.pipes ?? []).forEach(p => addPipe(layer, p));
 
-      // 5. Walls
+      // 5. Walls + corner fills
       drawingData.walls.forEach(w => addWall(layer, w));
-      // Fill corners to close wall junction gaps
-      fillCorners(layer, drawingData.walls, PAD);
+      fillCorners(layer, drawingData.walls);
 
-      // 6. Doors
-      (drawingData.doors ?? []).forEach(d =>
-        addDoor(layer, d as DoorSpec & { _roomOffsetX?: number; _roomOffsetY?: number }, drawingData.walls)
-      );
+      // 6. Doors — group by wall for even spacing
+      const doors = (drawingData.doors ?? []) as (DoorSpec & { _roomOffsetX?: number; _roomOffsetY?: number })[];
+      doors.forEach(door => {
+        const sameWall = doors.filter(d => d.wall === door.wall && (d as any).wallId === (door as any).wallId);
+        addDoor(layer, door, drawingData.walls, sameWall);
+      });
 
-      // 7. Windows
-      const windows = (drawingData as DrawingData & { windows?: WindowSpec[] }).windows ?? [];
-      windows.forEach(win =>
-        addWindow(
-          layer,
-          win as WindowSpec & { _roomOffsetX?: number; _roomOffsetY?: number },
-          drawingData.walls,
-          windows,
-        )
+      // 7. Windows — group by wall for even spacing
+      const windows = (drawingData.windows ?? []) as (WindowSpec & { _roomOffsetX?: number; _roomOffsetY?: number })[];
+      windows.forEach(win => {
+        const sameWall = windows.filter(w => w.wall === win.wall && (w as any).wallId === (win as any).wallId);
+        addWindow(layer, win, drawingData.walls, sameWall);
+      });
+
+      // 7b. Inter-room doors (shared wall openings)
+      (drawingData.interRoomDoors ?? []).forEach(ird =>
+        addInterRoomDoor(layer, ird, drawingData.walls)
       );
 
       // 8. Fixtures + labels
       drawingData.fixtures.forEach(f => addFixture(layer, f));
       drawingData.fixtures.forEach(f => addFixtureLabel(layer, f));
 
+      // 8b. Staircase
+      if (drawingData.staircaseSpec) {
+        addStaircase(layer, drawingData.staircaseSpec);
+      }
+
       // 9. Dimension lines
       drawingData.dimensions.forEach(d => addDimension(layer, d, totalWidth, totalHeight, minX, minY));
+
+      // 9b. Floor label (multi-floor mode)
+      if (drawingData.floorLabel && drawingData.elevation !== undefined) {
+        addFloorLabel(layer, drawingData.floorLabel, drawingData.elevation, totalWidth);
+      }
 
       // 10. Title block + Legend
       addTitleBlock(layer, totalWidth, totalHeight);
@@ -805,14 +980,27 @@ const Canvas2D = forwardRef<Canvas2DHandle, Canvas2DProps>(
       layer.draw();
 
       return () => {
+        stage.container().removeEventListener('wheel', handleWheel as EventListener);
         stage.destroy();
         stageRef.current = null;
       };
-    }, [drawingData, width, scale]);
+    }, [drawingData, width, scale]); // zoom NOT in deps → stage stays alive on zoom
 
     return (
-      <div className="border border-gray-300 rounded-lg overflow-hidden w-full">
-        <div ref={containerRef} className="bg-white w-full" />
+      <div className="flex flex-col border border-gray-300 rounded-lg overflow-hidden w-full">
+        {/* Zoom toolbar */}
+        <div className="flex items-center justify-between px-3 py-1.5 bg-slate-800 border-b border-slate-700">
+          <span className="text-xs text-slate-400">Floor Plan · Scroll = zoom · Drag = pan</span>
+          <ZoomToolbar
+            zoom={zoom}
+            onZoomIn={zoomIn}
+            onZoomOut={zoomOut}
+            onReset={resetZoom}
+            minZoom={MIN_ZOOM}
+            maxZoom={MAX_ZOOM}
+          />
+        </div>
+        <div ref={containerRef} className="bg-white w-full overflow-hidden cursor-grab active:cursor-grabbing" />
       </div>
     );
   }

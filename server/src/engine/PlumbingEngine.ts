@@ -1,26 +1,29 @@
-﻿import type { PlumbingSchema, PlumbingFixture, PlumbingPipe, PlumbingFixtureType } from '../../../shared/types';
-import { annotateDiameters } from './DiameterCalculator';
+import type { PlumbingSchema, PlumbingFixture, PlumbingPipe, PlumbingFixtureType } from '../../../shared/types';
+import { FLOW_UNITS, calcSupplyDiameter } from './DiameterCalculator';
 
-const FLOOR_HEIGHT = 220;
-const COLD_X  = 0;
-const HOT_X   = 45;
-const DRAIN_X = 100;
-const COLD_Y_OFF  = 80;
-const HOT_Y_OFF   = 95;
-const DRAIN_Y_OFF = 40;
-const FIXTURE_START_X = 200;
-const FIXTURE_STEP_X  = 160;
+// ── Layout constants ────────────────────────────────────────────────────────────
+const FLOOR_HEIGHT    = 240;  // canvas px per floor (increased for better spacing)
+const COLD_X          = 0;
+const HOT_X           = 50;
+const DRAIN_X         = 110;
+const COLD_Y_OFF      = 90;   // cold branch height within floor
+const HOT_Y_OFF       = 106;  // hot branch height (15px below cold)
+const DRAIN_COLL_Y    = 30;   // drain collector height within floor (near bottom)
+const FIXTURE_START_X = 220;  // first fixture X
+const FIXTURE_STEP_X  = 175;  // spacing between fixtures
 
+// ── Types ────────────────────────────────────────────────────────────────────────
 export interface FloorSpec {
   floor: number;
   fixtures: PlumbingFixtureType[];
 }
 
+// ── Description parser ────────────────────────────────────────────────────────────
 function detectFixtures(text: string): PlumbingFixtureType[] {
   const t = text.toLowerCase();
   const r: PlumbingFixtureType[] = [];
-  if (/lavabo|sink/.test(t))               r.push('sink');
-  if (/unitaz|toilet|hojatxona|wc/.test(t)) r.push('toilet');
+  if (/lavabo|sink/.test(t))                r.push('sink');
+  if (/unitar|unitaz|toilet|hojatxona|wc/.test(t)) r.push('toilet');
   if (/vanna|bathtub/.test(t))              r.push('bathtub');
   if (/dush|shower|kabina/.test(t))         r.push('shower');
   if (/kir\s*yuv|washing/.test(t))          r.push('washing_machine');
@@ -41,13 +44,10 @@ function extractFloorSections(desc: string, floorCount: number): string[] {
   }
   if (markers.length !== floorCount) return [];
   markers.sort((a, b) => a.floor - b.floor);
-  const sections: string[] = [];
-  for (let i = 0; i < markers.length; i++) {
-    const start = markers[i].contentStart;
-    const end   = i + 1 < markers.length ? markers[i + 1].markerStart : desc.length;
-    sections.push(desc.slice(start, end).trim());
-  }
-  return sections;
+  return markers.map((m, i) => {
+    const end = i + 1 < markers.length ? markers[i + 1].markerStart : desc.length;
+    return desc.slice(m.contentStart, end).trim();
+  });
 }
 
 export function parsePlumbingDescription(description: string): FloorSpec[] {
@@ -59,40 +59,110 @@ export function parsePlumbingDescription(description: string): FloorSpec[] {
   if (sections.length === floorCount) {
     return sections.map((text, i) => ({ floor: i, fixtures: detectFixtures(text) }));
   }
-  const common = detectFixtures(desc);
+  const common  = detectFixtures(desc);
   const fixtures = common.length > 0 ? common : ['sink', 'toilet', 'shower'] as PlumbingFixtureType[];
   return Array.from({ length: floorCount }, (_, i) => ({ floor: i, fixtures }));
 }
 
+// ── Engine ────────────────────────────────────────────────────────────────────────
 export class PlumbingEngine {
   generate(description: string): PlumbingSchema {
-    const id = `plumbing-${Date.now()}`;
-    const specs = parsePlumbingDescription(description);
+    const id        = `plumbing-${Date.now()}`;
+    const specs     = parsePlumbingDescription(description);
     const floorCount = specs.length;
+
     const fixtures: PlumbingFixture[] = [];
-    const pipes: PlumbingPipe[] = [];
+    const pipes: PlumbingPipe[]       = [];
+
     for (const spec of specs) {
-      const floorY = spec.floor * FLOOR_HEIGHT;
-      const coldBranchY  = floorY + COLD_Y_OFF;
-      const hotBranchY   = floorY + HOT_Y_OFF;
-      const drainBranchY = floorY + DRAIN_Y_OFF;
+      const n = spec.fixtures.length;
+      if (n === 0) continue;
+
+      const floorBase  = spec.floor * FLOOR_HEIGHT;
+      const coldY      = floorBase + COLD_Y_OFF;
+      const hotY       = floorBase + HOT_Y_OFF;
+      const drainCollY = floorBase + DRAIN_COLL_Y;
+
+      const lastX      = FIXTURE_START_X + (n - 1) * FIXTURE_STEP_X;
+      const hasHot     = spec.fixtures.some(t => t !== 'toilet');
+
+      // ── Single cold branch for the whole floor ──────────────────────────────
+      const coldFlow = spec.fixtures
+        .filter(t => t !== 'toilet')
+        .reduce((s, t) => s + (FLOW_UNITS[t] ?? 0.3), 0);
+      const branchDn = calcSupplyDiameter(coldFlow || 0.3);
+
+      pipes.push({
+        id: `cold-branch-${spec.floor}`,
+        type: 'cold',
+        path: [{ x: COLD_X, y: coldY }, { x: lastX, y: coldY }],
+        diameter: branchDn,
+        label: `Dn ${branchDn}`,
+      });
+
+      // ── Single hot branch for the whole floor ───────────────────────────────
+      if (hasHot) {
+        pipes.push({
+          id: `hot-branch-${spec.floor}`,
+          type: 'hot',
+          path: [{ x: HOT_X, y: hotY }, { x: lastX, y: hotY }],
+          diameter: branchDn,
+          label: `Dn ${branchDn}`,
+        });
+      }
+
+      // ── Horizontal drain collector ──────────────────────────────────────────
+      pipes.push({
+        id: `drain-coll-${spec.floor}`,
+        type: 'drain',
+        path: [{ x: DRAIN_X, y: drainCollY }, { x: lastX, y: drainCollY }],
+        diameter: 100,
+        label: 'Dn 100',
+      });
+
+      // ── Per-fixture: place fixture + vertical drain drop ────────────────────
       spec.fixtures.forEach((type, idx) => {
-        const x = FIXTURE_START_X + idx * FIXTURE_STEP_X;
+        const x   = FIXTURE_START_X + idx * FIXTURE_STEP_X;
         const fid = `f-${spec.floor}-${type}-${idx}`;
-        fixtures.push({ id: fid, type, floor: spec.floor, position: { x, y: coldBranchY } });
-        pipes.push({ id: `cold-${spec.floor}-${idx}`, type: 'cold', path: [{ x: COLD_X, y: coldBranchY }, { x, y: coldBranchY }], diameter: 20, label: 'Dn 20' });
-        if (type !== 'toilet') {
-          pipes.push({ id: `hot-${spec.floor}-${idx}`, type: 'hot', path: [{ x: HOT_X, y: hotBranchY }, { x, y: hotBranchY }], diameter: 20, label: 'Dn 20' });
-        }
-        pipes.push({ id: `drain-${spec.floor}-${idx}`, type: 'drain', path: [{ x, y: coldBranchY }, { x, y: drainBranchY }, { x: DRAIN_X, y: drainBranchY }], diameter: type === 'toilet' ? 100 : 50, label: type === 'toilet' ? 'Dn 100' : 'Dn 50' });
+
+        fixtures.push({ id: fid, type, floor: spec.floor, position: { x, y: coldY } });
+
+        // Vertical drain drop from fixture level to drain collector
+        const drainDn = type === 'toilet' ? 100 : 50;
+        pipes.push({
+          id: `drain-drop-${spec.floor}-${idx}`,
+          type: 'drain',
+          path: [{ x, y: coldY }, { x, y: drainCollY }],
+          diameter: drainDn,
+          label: `Dn ${drainDn}`,
+        });
       });
     }
-    const totalH = floorCount * FLOOR_HEIGHT;
+
+    // ── Risers ────────────────────────────────────────────────────────────────
+    const totalH   = floorCount * FLOOR_HEIGHT;
+    const allFixtures = fixtures; // for diameter calc
+    const totalFlow   = allFixtures.reduce((s, f) => s + (FLOW_UNITS[f.type] ?? 0.3), 0);
+    const riserDn     = calcSupplyDiameter(totalFlow);
+
     const risers: PlumbingPipe[] = [
-      { id: 'riser-cold',  type: 'cold',  path: [{ x: COLD_X,  y: 0 }, { x: COLD_X,  y: totalH }], diameter: 32,  label: 'Dn 32'  },
-      { id: 'riser-hot',   type: 'hot',   path: [{ x: HOT_X,   y: 0 }, { x: HOT_X,   y: totalH }], diameter: 32,  label: 'Dn 32'  },
-      { id: 'riser-drain', type: 'drain', path: [{ x: DRAIN_X, y: 0 }, { x: DRAIN_X, y: totalH }], diameter: 100, label: 'Dn 100' },
+      {
+        id: 'riser-cold', type: 'cold',
+        path: [{ x: COLD_X, y: 0 }, { x: COLD_X, y: totalH }],
+        diameter: riserDn, label: `Dn ${riserDn}`,
+      },
+      {
+        id: 'riser-hot', type: 'hot',
+        path: [{ x: HOT_X, y: 0 }, { x: HOT_X, y: totalH }],
+        diameter: riserDn, label: `Dn ${riserDn}`,
+      },
+      {
+        id: 'riser-drain', type: 'drain',
+        path: [{ x: DRAIN_X, y: 0 }, { x: DRAIN_X, y: totalH }],
+        diameter: 100, label: 'Dn 100',
+      },
     ];
-    return annotateDiameters({ id, floorCount, fixtures, pipes, risers });
+
+    return { id, floorCount, fixtures, pipes, risers };
   }
 }
