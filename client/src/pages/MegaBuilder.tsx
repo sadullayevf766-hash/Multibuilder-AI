@@ -26,6 +26,8 @@ import BoilerRoomCanvas3D  from '../components/BoilerRoomCanvas3D';
 import FacadeCanvas2D      from '../components/FacadeCanvas2D';
 import FacadeCanvas3D      from '../components/FacadeCanvas3D';
 import Canvas2D            from '../components/Canvas2D';
+import ElectricalCanvas    from '../components/ElectricalCanvas';
+import ElevationCanvas     from '../components/ElevationCanvas';
 
 // ── Quick types ───────────────────────────────────────────────────────────────
 const STAGE_LABELS = { plan: 'Rejalashtirish', build: 'Generatsiya', review: 'Ko\'rish va Tahrirlash' };
@@ -320,10 +322,14 @@ function DisciplineCanvas({
         ? <div style={{ width: '100%', height: '100%', minHeight: 500 }}><FacadeCanvas3D schema={s} /></div>
         : <FacadeCanvas2D schema={s} />;
 
-    case 'floor-plan':
     case 'electrical':
-    case 'plumbing':
+      return <ElectricalCanvas data={s} />;
+
     case 'architecture':
+      return <ElevationCanvas data={s} view="elevations" />;
+
+    case 'floor-plan':
+    case 'plumbing':
     case 'decor':
     default:
       return <Canvas2D drawingData={s} />;

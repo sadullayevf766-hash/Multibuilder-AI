@@ -332,14 +332,23 @@ export class GeminiParser {
     }
 
     // 2. Fallback: local smart parser
-    console.log('[MODE] LOCAL fallback');
+    return this.parseDescriptionLocal(description);
+  }
+
+  // Direct local parse — Gemini urinmasdan, tez ishlaydi (Mega build uchun)
+  async parseDescriptionLocal(description: string): Promise<RoomSpec | FloorPlan> {
+    const cacheKey = 'local:' + description.toLowerCase().trim();
+    const cached = this.cache.get(cacheKey);
+    if (cached && Date.now() - cached.time < this.CACHE_TTL) return cached.result;
+
+    console.log('[MODE] LOCAL direct');
     const lines = description.trim().split('\n').map(l => l.trim()).filter(l => l.length > 3);
+    let result: RoomSpec | FloorPlan;
     if (lines.length >= 2) {
-      const result = await this.parseMultiLineRooms(lines);
-      this.cache.set(cacheKey, { result, time: Date.now() });
-      return result;
+      result = await this.parseMultiLineRooms(lines);
+    } else {
+      result = this.smartLocalParse(description);
     }
-    const result = this.smartLocalParse(description);
     this.cache.set(cacheKey, { result, time: Date.now() });
     return result;
   }

@@ -231,9 +231,9 @@ app.post('/api/mega/build', async (req, res) => {
     const results: Record<string, unknown> = {};
     const prompts: Record<string, string> = spec.disciplinePrompts ?? {};
 
-    for (const disc of (spec.disciplines as string[])) {
+    // Barcha disciplinalar parallel build qilinadi
+    await Promise.all((spec.disciplines as string[]).map(async (disc) => {
       try {
-        // Gemini tomonidan yozilgan maxsus tavsif, yo'q bo'lsa eski fallback
         const desc = prompts[disc] || `${spec.floorCount} qavatli bino, jami ${spec.totalAreaM2}m². ${spec.buildingDescription}`;
         console.log(`[MEGA/BUILD] ${disc} prompt: "${desc.slice(0, 80)}"`);
 
@@ -254,7 +254,6 @@ app.post('/api/mega/build', async (req, res) => {
           const rooms  = parseStormRooms(desc);
           results[disc] = new StormDrainEngine().generate(rooms);
         } else if (disc === 'boiler-room') {
-          // boiler-room uchun desc ham ishlatiladi + spec fallback
           const floors      = spec.floorCount ?? 1;
           const totalAreaM2 = spec.totalAreaM2 ?? 200;
           results[disc] = boilerRoomEngine.generate({
@@ -266,15 +265,34 @@ app.post('/api/mega/build', async (req, res) => {
         } else if (disc === 'facade') {
           const facInput = parseFacadeInput(desc);
           results[disc] = facadeEngine.generate(facInput);
-        } else if (disc === 'floor-plan' || disc === 'electrical' || disc === 'architecture' || disc === 'plumbing' || disc === 'decor') {
-          const parsed = await geminiParser.parseDescription(desc);
-          results[disc] = floorPlanEngine.generateDrawing(parsed as Parameters<typeof floorPlanEngine.generateDrawing>[0]);
+        } else if (disc === 'floor-plan') {
+          const parsed = await geminiParser.parseDescriptionLocal(desc);
+          results[disc] = 'rooms' in parsed
+            ? floorPlanEngine.generateFloorPlan(parsed)
+            : floorPlanEngine.generateDrawing(parsed);
+        } else if (disc === 'architecture') {
+          const parsed = await geminiParser.parseDescriptionLocal(desc);
+          results[disc] = 'rooms' in parsed
+            ? architectureEngine.generateFromFloorPlan(parsed)
+            : architectureEngine.generateFromRoom(parsed);
+        } else if (disc === 'electrical') {
+          const parsed = await geminiParser.parseDescriptionLocal(desc);
+          results[disc] = 'rooms' in parsed
+            ? electricalEngine.generateFromFloorPlan(parsed)
+            : electricalEngine.generateFromRoom(parsed);
+        } else if (disc === 'plumbing') {
+          results[disc] = plumbingEngine.generate(desc);
+        } else if (disc === 'decor') {
+          const parsed = await geminiParser.parseDescriptionLocal(desc);
+          results[disc] = 'rooms' in parsed
+            ? decorEngine.generateFromFloorPlan(parsed)
+            : decorEngine.generateFromRoom(parsed);
         }
       } catch (e) {
         console.error(`[MEGA/BUILD] ${disc} xatolik:`, (e as Error).message);
         results[disc] = null;
       }
-    }
+    }));
 
     return res.json({ results });
   } catch (err) {
