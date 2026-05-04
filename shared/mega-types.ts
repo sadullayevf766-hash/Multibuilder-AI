@@ -23,6 +23,8 @@ export interface MegaProjectSpec {
   floorAreas:          number[];          // har qavat uchun m²
   buildingDescription: string;            // original user text
   disciplines:         MegaDiscipline[];  // faqat user so'raganlar
+  // Gemini tomonidan har modul uchun yozilgan natural tavsif — parser uchun
+  disciplinePrompts:   Partial<Record<MegaDiscipline, string>>;
   hasWarmFloor:        boolean;
   hasWarmWall:         boolean;
   hasHvs:              boolean;           // issiq suv ta'minoti
@@ -154,7 +156,7 @@ export function emptyGenerations(): MegaGenerations {
 export function defaultSpec(): MegaProjectSpec {
   return {
     floorCount: 1, totalAreaM2: 100, floorAreas: [100],
-    buildingDescription: '', disciplines: [],
+    buildingDescription: '', disciplines: [], disciplinePrompts: {},
     hasWarmFloor: false, hasWarmWall: false, hasHvs: true,
     roofAreaM2: 100, balconyAreaM2: 0,
     style: 'modern', language: 'uz', notes: '',

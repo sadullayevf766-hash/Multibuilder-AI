@@ -10,7 +10,12 @@ import {
 function extractSpecJson(text: string): MegaProjectSpec | null {
   const m = text.match(/###SPEC_JSON_START###\s*([\s\S]*?)\s*###SPEC_JSON_END###/);
   if (!m) return null;
-  try { return JSON.parse(m[1]) as MegaProjectSpec; } catch { return null; }
+  try {
+    const spec = JSON.parse(m[1]) as MegaProjectSpec;
+    // disciplinePrompts bo'sh bo'lsa default bo'sh ob'ekt
+    if (!spec.disciplinePrompts) spec.disciplinePrompts = {};
+    return spec;
+  } catch { return null; }
 }
 
 function extractEditJson(text: string): Omit<MegaEditResult, 'reply'> | null {
@@ -52,7 +57,7 @@ async function callGeminiRest(
       body: JSON.stringify({
         system_instruction: { parts: [{ text: systemPrompt }] },
         contents,
-        generationConfig: { temperature: 0.4, maxOutputTokens: 2048 },
+        generationConfig: { temperature: 0.4, maxOutputTokens: 3000 },
       }),
       signal: controller.signal,
     });
@@ -66,7 +71,7 @@ async function callGeminiRest(
   }
 }
 
-// ── Local fallback spec parser ────────────────────────────────────────────────
+// ── Local fallback: spec + disciplinePrompts parser ───────────────────────────
 
 function localParseSpec(description: string): MegaProjectSpec {
   const text = description.toLowerCase();
@@ -74,13 +79,10 @@ function localParseSpec(description: string): MegaProjectSpec {
   const floorMatch = description.match(/(\d+)\s*(?:qavat|этаж(?:а|ей)?|floor|kat)/i);
   const floorCount = floorMatch ? parseInt(floorMatch[1]) : 1;
 
-  // Maydon regex — m², м², m2, м2, кв.м, sq.m
   const AREA_RX = /(\d+(?:[.,]\d+)?)\s*(?:m[²2²]|м[²2²]|кв\.?\s*м|sq\.?\s*m)/gi;
-  // Avval "jami/umumiy/общий/total/итого" bilan birga kelgan sonni qidirish
   const totalAreaMatch = description.match(
     /(?:jami|umumiy|общий|total|итого|всего)\s*[:\-]?\s*(\d+(?:[.,]\d+)?)\s*(?:m[²2²]|м[²2²]|кв\.?\s*м)/i
   );
-  // Barcha maydon raqamlarini topib, eng kattasini olish
   const allAreaMatches = [...description.matchAll(AREA_RX)];
   const areas = allAreaMatches.map(m => parseFloat(m[1].replace(',', '.')));
   const maxArea = areas.length > 0 ? Math.max(...areas) : 0;
@@ -90,18 +92,18 @@ function localParseSpec(description: string): MegaProjectSpec {
   const perFloor = Math.round(totalAreaM2 / floorCount);
 
   const disciplines: MegaDiscipline[] = [];
-  if (/issiq pol|теплый пол|warm.?floor|теплые пол/i.test(text))           disciplines.push('warm-floor');
-  if (/suv ta'?min|водоснабж|water.?supply|водопровод/i.test(text))        disciplines.push('water-supply');
-  if (/kanalizatsiya|канализация|sewage|водоотведени/i.test(text))          disciplines.push('sewage');
-  if (/yomg'?ir|ливневка|storm.?drain|дождев/i.test(text))                 disciplines.push('storm-drain');
-  if (/qozonxona|котельная|boiler|тепловой насос/i.test(text))              disciplines.push('boiler-room');
-  if (/elektr|электр|electr|освещени|проводк/i.test(text))                 disciplines.push('electrical');
-  if (/xona reja|планировка|floor.?plan/i.test(text))                       disciplines.push('floor-plan');
-  if (/arxitektura|архитектур|architect/i.test(text))                        disciplines.push('architecture');
-  if (/fasad|фасад|facade|exterior|tashqi|экстерьер/i.test(text))           disciplines.push('facade');
-  if (/santexnika|сантехника|plumbing/i.test(text))                         disciplines.push('plumbing');
-  if (/interer|дизайн|interior|decor/i.test(text))                          disciplines.push('decor');
-  // "barcha" / "все" / "all" kalit so'zi — asosiy 4 ta soha
+  if (/issiq pol|теплый пол|warm.?floor/i.test(text))             disciplines.push('warm-floor');
+  if (/suv ta'?min|водоснабж|water.?supply/i.test(text))          disciplines.push('water-supply');
+  if (/kanalizatsiya|канализация|sewage/i.test(text))             disciplines.push('sewage');
+  if (/yomg'?ir|ливневка|storm.?drain/i.test(text))              disciplines.push('storm-drain');
+  if (/qozonxona|котельная|boiler/i.test(text))                   disciplines.push('boiler-room');
+  if (/elektr|электр|electr/i.test(text))                         disciplines.push('electrical');
+  if (/xona reja|планировка|floor.?plan/i.test(text))             disciplines.push('floor-plan');
+  if (/arxitektura|архитектур|architect/i.test(text))             disciplines.push('architecture');
+  if (/fasad|фасад|facade|tashqi/i.test(text))                    disciplines.push('facade');
+  if (/santexnika|сантехника|plumbing/i.test(text))               disciplines.push('plumbing');
+  if (/interer|дизайн|interior|decor/i.test(text))                disciplines.push('decor');
+
   if (disciplines.length === 0 || /barcha.?muhand|все.?инжен|all.?engine/i.test(text)) {
     if (!disciplines.includes('water-supply')) disciplines.push('water-supply');
     if (!disciplines.includes('sewage'))       disciplines.push('sewage');
@@ -109,7 +111,7 @@ function localParseSpec(description: string): MegaProjectSpec {
     if (!disciplines.includes('floor-plan'))   disciplines.push('floor-plan');
   }
 
-  const hasWarmFloor  = /issiq pol|теплый пол/.test(text);
+  const hasWarmFloor  = disciplines.includes('warm-floor');
   const hasWarmWall   = /issiq devor|теплые стены/.test(text);
   const hasHvs        = !/no.?hvs|без.?гвс/.test(text);
   const roofMatch2    = description.match(/tom\s+(\d+)\s*m/i);
@@ -117,32 +119,75 @@ function localParseSpec(description: string): MegaProjectSpec {
   const balcMatch     = description.match(/(\d+)\s*(?:ta\s+)?balkon/i);
   const balconyAreaM2 = balcMatch ? parseInt(balcMatch[1]) * 12 : 0;
 
+  // Har modul uchun fallback natural tavsif yasash
+  const floorStr = Array.from({ length: floorCount }, (_, i) => `${i + 1}-qavat ${perFloor}m²`).join('. ');
+  const disciplinePrompts: Partial<Record<MegaDiscipline, string>> = {};
+
+  for (const disc of disciplines) {
+    disciplinePrompts[disc] = buildLocalPrompt(disc, {
+      floorCount, perFloor, totalAreaM2,
+      hasWarmFloor, hasWarmWall, hasHvs,
+      roofAreaM2, balconyAreaM2,
+      floorStr, description,
+    });
+  }
+
   return {
     floorCount, totalAreaM2, floorAreas: Array(floorCount).fill(perFloor),
-    buildingDescription: description, disciplines,
+    buildingDescription: description, disciplines, disciplinePrompts,
     hasWarmFloor, hasWarmWall, hasHvs, roofAreaM2, balconyAreaM2,
     style: 'modern', language: 'uz', notes: '',
   };
 }
 
-// ── Description builder: spec → per-discipline description ───────────────────
+// ── Local fallback prompt builder per discipline ──────────────────────────────
 
-export function buildDescription(spec: MegaProjectSpec, discipline: MegaDiscipline): string {
-  const { floorCount, floorAreas, totalAreaM2, buildingDescription } = spec;
-  const floorStr = floorAreas.map((a, i) => `${i + 1}-qavat ${a}m²`).join(', ');
-  const base = `${floorCount} qavatli bino: ${floorStr}. ${buildingDescription}`;
+interface LocalPromptCtx {
+  floorCount: number; perFloor: number; totalAreaM2: number;
+  hasWarmFloor: boolean; hasWarmWall: boolean; hasHvs: boolean;
+  roofAreaM2: number; balconyAreaM2: number;
+  floorStr: string; description: string;
+}
 
-  switch (discipline) {
+function buildLocalPrompt(disc: MegaDiscipline, ctx: LocalPromptCtx): string {
+  const { floorCount, perFloor, totalAreaM2, hasWarmFloor, hasHvs,
+          roofAreaM2, balconyAreaM2, description } = ctx;
+
+  // Xona qatorini quramiz: har qavat uchun taxminiy xonalar
+  const roomsPerFloor = () => {
+    const living  = Math.round(perFloor * 0.30);
+    const kitchen = Math.round(perFloor * 0.15);
+    const bath    = Math.round(perFloor * 0.08);
+    const bed     = Math.round(perFloor * 0.20);
+    return `mehmonxona ${living}m², oshxona ${kitchen}m², hammom ${bath}m², yotoqxona ${bed}m²`;
+  };
+
+  switch (disc) {
     case 'warm-floor':
-      return `${base}${spec.hasWarmWall ? ', issiq devorlar ham bilan' : ''}`;
+    case 'water-supply':
+    case 'sewage': {
+      const floors = Array.from({ length: floorCount }, (_, i) =>
+        `${i + 1}-qavat: ${roomsPerFloor()}`
+      ).join('. ');
+      return floors + '.';
+    }
     case 'storm-drain':
-      return `Tom ${spec.roofAreaM2}m², balkoni ${spec.balconyAreaM2}m². ${base}`;
+      return `tom ${roofAreaM2}m²${balconyAreaM2 > 0 ? `, balkon ${balconyAreaM2}m²` : ''}.`;
     case 'boiler-room':
-      return `${floorCount} qavatli uy, jami ${totalAreaM2}m²${spec.hasWarmFloor ? ', issiq pol tizimi bilan' : ''}${spec.hasHvs ? '' : ', GVS siz'}.`;
+      return `${floorCount} qavatli uy, jami ${totalAreaM2}m²${hasWarmFloor ? ', issiq pol tizimi bilan' : ''}${hasHvs ? ', GVS kerak' : ', GVS siz'}.`;
     case 'facade':
-      return `${spec.style || 'modern'} uslubdagi ${floorCount} qavatli bino, ${totalAreaM2}m². ${buildingDescription}`;
-    default:
-      return base;
+      return `zamonaviy uslubdagi ${floorCount} qavatli bino, jami ${totalAreaM2}m². ${description}`;
+    case 'floor-plan':
+    case 'architecture':
+    case 'electrical':
+    case 'plumbing':
+    case 'decor':
+    default: {
+      const floors = Array.from({ length: floorCount }, (_, i) =>
+        `${i + 1}-qavat: ${roomsPerFloor()}`
+      ).join('. ');
+      return `${floorCount} qavatli bino, jami ${totalAreaM2}m². ${floors}.`;
+    }
   }
 }
 
@@ -166,11 +211,10 @@ export class MegaPlannerParser {
       }
     }
 
-    // Local fallback — barcha kontekstni birlashtirish
+    // Local fallback
     const allText = [...history.map(m => m.content), userMessage].join(' ');
     const spec    = localParseSpec(allText);
 
-    // Agar bitta xabarda yetarli ma'lumot bo'lsa — darhol spec qaytarish
     const hasFloors = /\d+\s*(?:qavat|этаж|этажа|этажей|floor|kat)/i.test(allText);
     const hasArea   = /\d+\s*(?:m[²2²]|кв\.?\s*м|м2|m2|sq\.?\s*m)/i.test(allText);
     const hasDisc   = spec.disciplines.length > 0;
@@ -183,15 +227,13 @@ export class MegaPlannerParser {
       };
     }
 
-    // Agar faqat qavatlar va maydon bo'lsa, sohalar so'rash
     if (hasFloors && hasArea && !hasDisc) {
       return {
-        reply: 'Qaysi muhandislik sohalari bo\'yicha chizma kerak? Keraklilarini ayting:\n\n📐 Xona rejasi · 🏛️ Arxitektura · ⚡ Elektr\n💧 Suv ta\'minoti · 🚽 Kanalizatsiya · 🌧️ Yomg\'ir suvi\n♨️ Issiq pol · 🔥 Qozonxona · 🛋️ Interer dizayn',
+        reply: 'Qaysi muhandislik sohalari bo\'yicha chizma kerak?\n\n📐 Xona rejasi · 🏛️ Arxitektura · ⚡ Elektr\n💧 Suv ta\'minoti · 🚽 Kanalizatsiya · 🌧️ Yomg\'ir suvi\n♨️ Issiq pol · 🔥 Qozonxona · 🛋️ Interer dizayn',
         isComplete: false, spec: null,
       };
     }
 
-    // Agar faqat qavatlar bo'lsa, maydon so'rash
     if (hasFloors && !hasArea) {
       return {
         reply: `${spec.floorCount} qavat — ajoyib! Har bir qavatning taxminiy maydoni (m²) qancha?`,
@@ -199,7 +241,6 @@ export class MegaPlannerParser {
       };
     }
 
-    // Boshlang'ich savol
     return {
       reply: 'Salom! 🏗️ Loyihangizni rejalashtirish uchun bir nechta savol.\n\nBinoda nechta qavat bo\'ladi?',
       isComplete: false, spec: null,
@@ -243,12 +284,32 @@ export class MegaPlannerParser {
       [/elektr|electr/, 'electrical'],
       [/xona reja|floor.?plan/, 'floor-plan'],
       [/arxitektura|architect/, 'architecture'],
+      [/fasad|facade/, 'facade'],
       [/santexnika|plumbing/, 'plumbing'],
       [/interer|decor/, 'decor'],
     ];
-    for (const [rx, d] of map) { if (rx.test(text) && spec.disciplines.includes(d)) targets.push(d); }
+    for (const [rx, d] of map) {
+      if (rx.test(text) && spec.disciplines.includes(d)) targets.push(d);
+    }
     const isGlobal = /hammasi|все|all|qayta gen|regenerat/.test(text);
     const final = isGlobal ? [...spec.disciplines] : (targets.length ? targets : [...spec.disciplines]);
-    return { reply: `Tushunarli! ${final.join(', ')} qayta generatsiya qilaman...`, targets: final, specPatch: {} };
+
+    // Rebuild disciplinePrompts for targets
+    const updatedPrompts: Partial<Record<MegaDiscipline, string>> = {};
+    const perFloor = Math.round(spec.totalAreaM2 / spec.floorCount);
+    for (const disc of final) {
+      updatedPrompts[disc] = buildLocalPrompt(disc, {
+        floorCount: spec.floorCount, perFloor, totalAreaM2: spec.totalAreaM2,
+        hasWarmFloor: spec.hasWarmFloor, hasWarmWall: spec.hasWarmWall, hasHvs: spec.hasHvs,
+        roofAreaM2: spec.roofAreaM2, balconyAreaM2: spec.balconyAreaM2,
+        floorStr: '', description: spec.buildingDescription,
+      });
+    }
+
+    return {
+      reply: `Tushunarli! ${final.join(', ')} qayta generatsiya qilaman...`,
+      targets: final,
+      specPatch: { disciplinePrompts: { ...spec.disciplinePrompts, ...updatedPrompts } },
+    };
   }
 }

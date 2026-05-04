@@ -9,7 +9,7 @@ import { WaterSupplyEngine, parseWaterRooms } from './engine/WaterSupplyEngine';
 import { SewageEngine, parseSewageRooms } from './engine/SewageEngine';
 import { StormDrainEngine, parseStormRooms } from './engine/StormDrainEngine';
 import { BoilerRoomEngine } from './engine/BoilerRoomEngine';
-import { MegaPlannerParser, buildDescription } from './ai/MegaPlannerParser';
+import { MegaPlannerParser } from './ai/MegaPlannerParser';
 import { FacadeEngine, parseFacadeInput } from './engine/FacadeEngine';
 import { PlumbingEngine } from './engine/PlumbingEngine';
 import { ElectricalEngine } from './engine/ElectricalEngine';
@@ -229,10 +229,13 @@ app.post('/api/mega/build', async (req, res) => {
     console.log(`[MEGA/BUILD] ${spec.disciplines?.length} soha, ${spec.floorCount} qavat`);
 
     const results: Record<string, unknown> = {};
+    const prompts: Record<string, string> = spec.disciplinePrompts ?? {};
 
     for (const disc of (spec.disciplines as string[])) {
       try {
-        const desc = buildDescription(spec, disc as Parameters<typeof buildDescription>[1]);
+        // Gemini tomonidan yozilgan maxsus tavsif, yo'q bo'lsa eski fallback
+        const desc = prompts[disc] || `${spec.floorCount} qavatli bino, jami ${spec.totalAreaM2}m². ${spec.buildingDescription}`;
+        console.log(`[MEGA/BUILD] ${disc} prompt: "${desc.slice(0, 80)}"`);
 
         if (disc === 'warm-floor') {
           const { parseWarmFloorRooms, WarmFloorEngine } = await import('./engine/WarmFloorEngine');
@@ -251,19 +254,19 @@ app.post('/api/mega/build', async (req, res) => {
           const rooms  = parseStormRooms(desc);
           results[disc] = new StormDrainEngine().generate(rooms);
         } else if (disc === 'boiler-room') {
+          // boiler-room uchun desc ham ishlatiladi + spec fallback
           const floors      = spec.floorCount ?? 1;
           const totalAreaM2 = spec.totalAreaM2 ?? 200;
           results[disc] = boilerRoomEngine.generate({
             floors, totalAreaM2,
-            hasWarmFloor: spec.hasWarmFloor ?? false,
+            hasWarmFloor: spec.hasWarmFloor ?? /issiq pol/i.test(desc),
             hasWarmWall:  spec.hasWarmWall  ?? false,
-            hasHvs:       spec.hasHvs       ?? true,
+            hasHvs:       spec.hasHvs       ?? !/gvs siz/i.test(desc),
           });
         } else if (disc === 'facade') {
           const facInput = parseFacadeInput(desc);
           results[disc] = facadeEngine.generate(facInput);
         } else if (disc === 'floor-plan' || disc === 'electrical' || disc === 'architecture' || disc === 'plumbing' || disc === 'decor') {
-          // GeminiParser + FloorPlanEngine
           const parsed = await geminiParser.parseDescription(desc);
           results[disc] = floorPlanEngine.generateDrawing(parsed as Parameters<typeof floorPlanEngine.generateDrawing>[0]);
         }
