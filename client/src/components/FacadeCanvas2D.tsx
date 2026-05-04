@@ -73,11 +73,11 @@ const FacadeCanvas2D = forwardRef<FacadeCanvas2DHandle, Props>(({ schema }, ref)
     if (!elev) return;
 
     // Masshtab hisoblash — chizma container ga sig'ishi kerak
-    const availW = (el.clientWidth  || 1100) - PAD * 2 - DIM_H * 2;
+    const availW = Math.max(400, (el.clientWidth  || 1100) - PAD * 2 - DIM_H * 2);
     const SCALE  = Math.min(80, availW / elev.totalWidth);   // px/m
-    const availH = (el.clientHeight || 700)  - PAD * 2 - DIM_H - STAMP_H - TITLE_H;
+    const availH = Math.max(300, (el.clientHeight || 700)  - PAD * 2 - DIM_H - STAMP_H - TITLE_H);
     const scaleH = availH / elev.totalHeight;
-    const U      = Math.min(SCALE, scaleH, 85);
+    const U      = Math.max(1, Math.min(SCALE, scaleH, 85));
 
     const drawW  = elev.totalWidth  * U;
     const drawH  = elev.totalHeight * U;
@@ -374,7 +374,7 @@ function drawRoof(
       stroke: '#1a1a2e', strokeWidth: 1.2,
     }));
     // Oluq (gutter)
-    if (roof.hasGutters) {
+    if (roof.hasGutters && over >= 0) {
       layer.add(new Konva.Arc({
         x: ox - over, y: oy + 4,
         innerRadius: 4, outerRadius: 8,
@@ -504,9 +504,10 @@ function drawWindow(
 
   if (style === 'arched') {
     // Yumaloq yuqori qism
+    const arcR = Math.max(1, w / 2);
     layer.add(new Konva.Arc({
       x: x + w / 2, y: y,
-      innerRadius: 0, outerRadius: w / 2,
+      innerRadius: 0, outerRadius: arcR,
       angle: 180, rotation: 0,
       fill: glass, stroke: frameC, strokeWidth: frame,
     }));
@@ -624,9 +625,10 @@ function drawDoor(
     }));
   } else if (door.style === 'arched') {
     // Yumaloq ustki qism
+    const doorArcR = Math.max(1, w / 2);
     layer.add(new Konva.Arc({
       x: x + w / 2, y,
-      innerRadius: 0, outerRadius: w / 2,
+      innerRadius: 0, outerRadius: doorArcR,
       angle: 180, rotation: 0,
       fill: colors.door, stroke: frameC, strokeWidth: 2.5,
     }));
