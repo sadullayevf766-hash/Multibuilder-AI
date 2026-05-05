@@ -15,11 +15,17 @@ const AuthContext = createContext<AuthContextType>({
   signOut: async () => {},
 });
 
+// Dev bypass fake user — faqat VITE_TEST_BYPASS_AUTH=true bo'lganda
+const DEV_FAKE_USER = (import.meta.env.DEV && import.meta.env.VITE_TEST_BYPASS_AUTH === 'true')
+  ? { id: '00000000-0000-0000-0000-000000000001', email: 'dev@test.com' } as User
+  : null;
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<User | null>(DEV_FAKE_USER);
+  const [loading, setLoading] = useState(!DEV_FAKE_USER);
 
   useEffect(() => {
+    if (DEV_FAKE_USER) return; // bypass — real session kerak emas
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);

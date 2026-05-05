@@ -15,7 +15,7 @@ import StormDrainCanvas,   { StormDrainCanvasHandle }    from '../components/Sto
 import StormDrain3DCanvas, { StormDrain3DCanvasHandle }  from '../components/StormDrain3DCanvas';
 import BoilerRoomCanvas2D, { BoilerRoom2DHandle }        from '../components/BoilerRoomCanvas2D';
 import BoilerRoomCanvas3D                                from '../components/BoilerRoomCanvas3D';
-import FacadeCanvas2D                                    from '../components/FacadeCanvas2D';
+import FacadeCanvas2D, { FacadeCanvas2DHandle }          from '../components/FacadeCanvas2D';
 import FacadeCanvas3D                                    from '../components/FacadeCanvas3D';
 
 import type { WarmFloorSchema, WarmFloorFloor } from '../../../server/src/engine/WarmFloorEngine';
@@ -409,6 +409,7 @@ export default function SuperGenerator() {
   const waterAxonRef        = useRef<WaterSupplyAxonCanvasHandle>(null);
   const sewageAxonRef       = useRef<SewageAxonCanvasHandle>(null);
   const boilerCanvas2dRef   = useRef<BoilerRoom2DHandle>(null);
+  const facadeCanvas2dRef   = useRef<FacadeCanvas2DHandle>(null);
 
   const hasSchema = superType === 'warm-floor'   ? !!warmSchema   :
                     superType === 'water-supply'  ? !!waterSchema  :
@@ -496,7 +497,7 @@ export default function SuperGenerator() {
     } else if (superType === 'boiler-room') {
       boilerCanvas2dRef.current?.exportToPdf('qozonxona.pdf');
     } else if (superType === 'facade') {
-      // FacadeCanvas2D has no ref handle yet — placeholder
+      facadeCanvas2dRef.current?.exportToPdf('fasad-chizma.pdf');
     } else {
       if (viewMode === '3d') stormCanvas3dRef.current?.exportToPdf('livnevka-3d.pdf');
       else stormCanvas2dRef.current?.exportToPdf('livnevka-2d.pdf');
@@ -770,7 +771,7 @@ export default function SuperGenerator() {
                       <FacadeCanvas3D schema={facadeSchema} />
                     </div>
                   ) : (
-                    <FacadeCanvas2D schema={facadeSchema} />
+                    <FacadeCanvas2D ref={facadeCanvas2dRef} schema={facadeSchema} />
                   )
                 )}
               </div>

@@ -576,7 +576,7 @@ export default function MegaBuilder() {
   const handleSave = useCallback(async () => {
     const { data: { session } } = await supabase.auth.getSession();
     const token = session?.access_token;
-    const userId = user?.id ?? session?.user?.id ?? 'dev-user';
+    const userId = user?.id ?? session?.user?.id ?? '00000000-0000-0000-0000-000000000001';
 
     if (savedProjectId) {
       // Already saved — update

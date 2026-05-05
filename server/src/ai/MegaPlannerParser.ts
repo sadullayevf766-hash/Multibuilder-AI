@@ -31,7 +31,14 @@ function cleanReply(text: string): string {
     .trim();
 }
 
-// ── Gemini REST API fetch ──────────────────────────────────────────────────────
+// ── Gemini REST API fetch (model cascade on 404/429) ─────────────────────────
+const GEMINI_MODELS = [
+  'gemini-2.0-flash',
+  'gemini-2.0-flash-lite',
+  'gemini-1.5-flash',
+  'gemini-1.5-flash-8b',
+];
+
 async function callGeminiRest(
   apiKey: string,
   systemPrompt: string,
@@ -39,36 +46,49 @@ async function callGeminiRest(
   userMessage: string,
   timeoutMs = 30000,
 ): Promise<string> {
-  const model = 'gemini-2.5-flash-preview-04-17';
-  const url   = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
   const contents = [
     ...history,
     { role: 'user', parts: [{ text: userMessage }] },
   ];
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let lastErr: Error = new Error('No models available');
 
-  try {
-    const res = await fetch(url, {
-      method:  'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents,
-        generationConfig: { temperature: 0.4, maxOutputTokens: 3000 },
-      }),
-      signal: controller.signal,
-    });
-    clearTimeout(timer);
-    if (!res.ok) throw new Error(`Gemini ${res.status}: ${res.statusText}`);
-    const data = await res.json();
-    return data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
-  } catch (err) {
-    clearTimeout(timer);
-    throw err;
+  for (const model of GEMINI_MODELS) {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const res = await fetch(url, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: systemPrompt }] },
+          contents,
+          generationConfig: { temperature: 0.4, maxOutputTokens: 3000 },
+        }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      if (res.status === 404 || res.status === 429) {
+        // Try next model
+        lastErr = new Error(`Gemini ${res.status} (${model})`);
+        continue;
+      }
+      if (!res.ok) throw new Error(`Gemini ${res.status}: ${res.statusText}`);
+      const data = await res.json();
+      const text = data.candidates?.[0]?.content?.parts?.[0]?.text ?? '';
+      if (text) return text;
+      lastErr = new Error(`Gemini empty response (${model})`);
+    } catch (err) {
+      clearTimeout(timer);
+      lastErr = err as Error;
+      if ((err as Error).name === 'AbortError') throw lastErr; // timeout — don't retry
+    }
   }
+
+  throw lastErr;
 }
 
 // ── Local fallback: spec + disciplinePrompts parser ───────────────────────────

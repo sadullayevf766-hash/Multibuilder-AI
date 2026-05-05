@@ -12,18 +12,15 @@ dist
 
 # Test va temp fayllar (root da)
 test-*.cjs
+test-*.py
 check-*.cjs
 test_*.js
 test_*.cjs
 pw-*.js
 pw-*.cjs
-mb-*.png
-ft-*.png
-final-*.png
-debug-*.png
-ws-*.png
-3d-test-*.png
-select-*.png
+*.png
+browser-test.py
+server-log.txt
 skills-lock.json
 
 # PDF fayllar (katta binary fayllar)
@@ -36,3 +33,6 @@ client/package-lock.json
 
 # Server build output
 server/dist/
+
+# Dev local store (test data, not for production)
+server/dev-projects.json

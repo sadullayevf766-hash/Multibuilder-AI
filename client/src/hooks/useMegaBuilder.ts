@@ -10,17 +10,27 @@ import type {
 import { emptyGenerations, DISCIPLINE_META } from '../../../shared/mega-types';
 
 // ── Fetch helpers ─────────────────────────────────────────────────────────────
-async function apiFetch(url: string, body: unknown) {
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.message ?? `Server xatolik ${res.status}`);
+async function apiFetch(url: string, body: unknown, timeoutMs = 60000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message ?? `Server xatolik ${res.status}`);
+    }
+    return res.json();
+  } catch (err) {
+    clearTimeout(timer);
+    if ((err as Error).name === 'AbortError') throw new Error('So\'rov vaqti tugadi (60s). Internet aloqasini tekshiring.');
+    throw err;
   }
-  return res.json();
 }
 
 // ── State ─────────────────────────────────────────────────────────────────────

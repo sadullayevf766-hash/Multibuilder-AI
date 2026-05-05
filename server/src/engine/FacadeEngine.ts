@@ -177,18 +177,18 @@ const STYLE_DEFAULTS: Record<FacadeStyle, {
     material: 'plaster',
     windowStyle: 'panoramic',
     colors: {
-      wall: '#2d2d2d',   // qoramtir
-      trim: '#1a1a1a',
-      roof: '#1a1a1a',
-      window: '#a8d8ea',
-      door: '#333333',
-      accent: '#c8a96e',  // oltin
+      wall: '#e8eaf0',   // och kulrang-oq (arxitektura chizmasiga mos)
+      trim: '#9ca3af',
+      roof: '#6b7280',
+      window: '#bae6fd',
+      door: '#4b5563',
+      accent: '#c8a96e',
     },
     winW: 1.8, winH: 1.8, winSill: 0.8,
     winsPerFloor: 3,
     hasDoorCanopy: false,
     decorations: [
-      { type: 'panel', color: '#1a1a1a', height: 0.15 },
+      { type: 'panel', color: '#d1d5db', height: 0.15 },
     ],
   },
 
@@ -289,12 +289,12 @@ const STYLE_DEFAULTS: Record<FacadeStyle, {
     material: 'concrete',
     windowStyle: 'horizontal',
     colors: {
-      wall: '#8a8880',   // beton kul
-      trim: '#5a5850',
-      roof: '#4a4840',
-      window: '#b0c8d8',
-      door: '#3a3830',
-      accent: '#d04a2a',  // qizil aktsent
+      wall: '#d4d6d8',   // och beton kul (chizma uchun)
+      trim: '#9ca3a8',
+      roof: '#6b7280',
+      window: '#bae6fd',
+      door: '#4b5563',
+      accent: '#d04a2a',
     },
     winW: 2.4, winH: 0.8, winSill: 1.5,
     winsPerFloor: 4,
