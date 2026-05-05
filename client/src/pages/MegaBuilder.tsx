@@ -9,6 +9,8 @@ import { useNavigate } from 'react-router-dom';
 import { useMegaBuilder } from '../hooks/useMegaBuilder';
 import type { MegaDiscipline, ViewMode } from '../../../shared/mega-types';
 import { DISCIPLINE_META } from '../../../shared/mega-types';
+import { useAuth } from '../lib/auth';
+import { supabase } from '../lib/supabase';
 
 // Canvas imports
 import WarmFloorCanvas     from '../components/WarmFloorCanvas';
@@ -565,9 +567,31 @@ function ReviewStage(hook: ReturnType<typeof useMegaBuilder>) {
 
 // ── Main MegaBuilder Page ─────────────────────────────────────────────────────
 export default function MegaBuilder() {
-  const navigate = useNavigate();
-  const hook = useMegaBuilder();
-  const { stage, spec, goToPlan } = hook;
+  const navigate  = useNavigate();
+  const hook      = useMegaBuilder();
+  const { stage, spec, goToPlan, savedProjectId, saveLoading, saveProject, updateProject } = hook;
+  const { user }  = useAuth();
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+
+  const handleSave = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    const userId = user?.id ?? session?.user?.id ?? 'dev-user';
+
+    if (savedProjectId) {
+      // Already saved — update
+      await updateProject(token);
+      setSaveMsg('Yangilandi ✓');
+    } else {
+      // First save
+      const id = await saveProject(userId, token);
+      if (id) {
+        setSaveMsg('Saqlandi ✓');
+        setTimeout(() => setSaveMsg(null), 3000);
+      }
+    }
+    setTimeout(() => setSaveMsg(null), 3000);
+  }, [user, savedProjectId, saveProject, updateProject]);
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white flex flex-col">
@@ -608,13 +632,26 @@ export default function MegaBuilder() {
           })}
         </div>
 
-        {spec && (
-          <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex items-center gap-3">
+          {spec && (
             <span className="text-xs text-slate-500">
               {spec.floorCount}q · {spec.totalAreaM2}m² · {spec.disciplines.length} soha
             </span>
-          </div>
-        )}
+          )}
+          {/* Save button — faqat review stage'da */}
+          {stage === 'review' && spec && (
+            <button
+              onClick={handleSave}
+              disabled={saveLoading}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold
+                         bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-50 transition">
+              {saveLoading ? '⏳' : savedProjectId ? '🔄 Yangilash' : '💾 Saqlash'}
+            </button>
+          )}
+          {saveMsg && (
+            <span className="text-xs text-emerald-400 font-medium animate-pulse">{saveMsg}</span>
+          )}
+        </div>
       </header>
 
       {/* Body */}

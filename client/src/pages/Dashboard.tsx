@@ -8,6 +8,14 @@ interface Project {
   name: string;
   created_at: string;
   deleted_at: string | null;
+  drawing_data?: {
+    project_type?: string;
+    spec?: { floorCount?: number; totalAreaM2?: number; disciplines?: string[] };
+  } | null;
+}
+
+function isMegaProject(p: Project): boolean {
+  return p.drawing_data?.project_type === 'mega';
 }
 
 type Tab = 'projects' | 'trash';
@@ -179,7 +187,11 @@ export default function Dashboard() {
             {!loading && projects.length > 0 && (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 {projects.map(project => (
-                  <div key={project.id} className="liquid-glass border border-white/10 rounded-2xl p-5 hover:border-white/25 transition-all group relative">
+                  <div key={project.id}
+                    className={`liquid-glass border rounded-2xl p-5 hover:border-white/25 transition-all group relative
+                      ${isMegaProject(project)
+                        ? 'border-orange-500/30 bg-orange-500/5 hover:border-orange-400/50'
+                        : 'border-white/10'}`}>
                     {renameId === project.id ? (
                       <div className="mb-3">
                         <input autoFocus value={renameName}
@@ -201,8 +213,29 @@ export default function Dashboard() {
                     ) : (
                       <>
                         {/* Full card clickable overlay */}
-                        <Link to={`/project/${project.id}`} className="absolute inset-0 rounded-2xl z-0" aria-label={project.name} />
+                        <Link
+                          to={isMegaProject(project) ? `/mega/${project.id}` : `/project/${project.id}`}
+                          className="absolute inset-0 rounded-2xl z-0"
+                          aria-label={project.name}
+                        />
+                        {isMegaProject(project) && (
+                          <div className="flex items-center gap-1.5 mb-2 relative z-10">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300 border border-orange-500/30">
+                              🏗️ MEGA
+                            </span>
+                            {project.drawing_data?.spec?.disciplines?.slice(0, 4).map(d => (
+                              <span key={d} className="text-[9px] px-1.5 py-0.5 rounded bg-white/5 text-gray-400 border border-white/10">
+                                {d}
+                              </span>
+                            ))}
+                          </div>
+                        )}
                         <h3 className="font-medium text-white mb-1 line-clamp-1 relative z-10">{project.name}</h3>
+                        {isMegaProject(project) && project.drawing_data?.spec && (
+                          <p className="text-xs text-orange-400/70 mb-1 relative z-10">
+                            {project.drawing_data.spec.floorCount}q · {project.drawing_data.spec.totalAreaM2}m² · {project.drawing_data.spec.disciplines?.length} soha
+                          </p>
+                        )}
                       </>
                     )}
                     <p className="text-xs text-gray-500 mb-4 relative z-10">

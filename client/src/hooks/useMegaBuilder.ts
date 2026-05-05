@@ -51,6 +51,12 @@ export interface MegaBuilderHook {
   setActiveView: (v: ViewMode) => void;
   sendEdit:      (text: string) => Promise<void>;
   goToPlan:      () => void;
+
+  // Save
+  savedProjectId: string | null;
+  saveLoading:    boolean;
+  saveProject:    (userId: string, authToken?: string) => Promise<string | null>;
+  updateProject:  (authToken?: string) => Promise<void>;
 }
 
 export function useMegaBuilder(): MegaBuilderHook {
@@ -67,6 +73,9 @@ export function useMegaBuilder(): MegaBuilderHook {
   const [activeView,  setActiveView]  = useState<ViewMode>('2d');
   const [editHistory, setEditHistory] = useState<MegaChatMessage[]>([]);
   const [editLoading, setEditLoading] = useState(false);
+
+  const [savedProjectId, setSavedProjectId] = useState<string | null>(null);
+  const [saveLoading,    setSaveLoading]    = useState(false);
 
   const specRef = useRef<MegaProjectSpec | null>(null);
   specRef.current = spec;
@@ -234,7 +243,60 @@ export function useMegaBuilder(): MegaBuilderHook {
     setEditHistory([]);
     setActiveDisc(null);
     setBuildProgress(0);
+    setSavedProjectId(null);
   }, []);
+
+  // ── Save ────────────────────────────────────────────────────────────────────
+  const saveProject = useCallback(async (userId: string, authToken?: string): Promise<string | null> => {
+    const currentSpec = specRef.current;
+    if (!currentSpec) return null;
+    setSaveLoading(true);
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+      const res = await fetch('/api/mega/save', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          userId,
+          name: `Mega loyiha — ${currentSpec.floorCount}q ${currentSpec.totalAreaM2}m²`,
+          spec: currentSpec,
+          generations,
+          chatHistory,
+          editHistory,
+        }),
+      });
+      if (!res.ok) throw new Error((await res.json()).message);
+      const data = await res.json();
+      setSavedProjectId(data.id);
+      return data.id;
+    } catch (err) {
+      console.error('[SAVE] Error:', err);
+      return null;
+    } finally {
+      setSaveLoading(false);
+    }
+  }, [generations, chatHistory, editHistory]);
+
+  const updateProject = useCallback(async (authToken?: string): Promise<void> => {
+    if (!savedProjectId) return;
+    const currentSpec = specRef.current;
+    if (!currentSpec) return;
+    setSaveLoading(true);
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+      await fetch(`/api/mega/project/${savedProjectId}`, {
+        method: 'PATCH',
+        headers,
+        body: JSON.stringify({ spec: currentSpec, generations, chatHistory, editHistory }),
+      });
+    } catch (err) {
+      console.error('[UPDATE] Error:', err);
+    } finally {
+      setSaveLoading(false);
+    }
+  }, [savedProjectId, generations, chatHistory, editHistory]);
 
   return {
     stage,
@@ -245,5 +307,6 @@ export function useMegaBuilder(): MegaBuilderHook {
     activeDisc, activeView, editHistory, editLoading,
     setActiveDisc, setActiveView,
     sendEdit, goToPlan,
+    savedProjectId, saveLoading, saveProject, updateProject,
   };
 }

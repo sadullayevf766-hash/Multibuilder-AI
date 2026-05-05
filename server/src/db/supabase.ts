@@ -40,6 +40,48 @@ export interface ProjectRecord {
   updated_at: string;
 }
 
+// Mega project — drawing_data ichida saqlanadi
+export interface MegaProjectData {
+  project_type: 'mega';
+  spec: unknown;
+  generations: unknown;          // Record<MegaDiscipline, GenerationState>
+  chatHistory: unknown[];
+  editHistory: unknown[];
+  savedAt: string;
+}
+
+export async function saveMegaProject(
+  userId: string,
+  name: string,
+  megaData: MegaProjectData,
+  authHeader?: string
+) {
+  const sb = authHeader ? getUserClient(authHeader) : getServiceClient();
+  const { data, error } = await sb
+    .from('projects')
+    .insert({ user_id: userId, name, drawing_data: megaData })
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function updateMegaProject(
+  id: string,
+  megaData: MegaProjectData,
+  authHeader?: string
+) {
+  const sb = authHeader ? getUserClient(authHeader) : getServiceClient();
+  const { data, error } = await sb
+    .from('projects')
+    .update({ drawing_data: megaData })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw new Error(error.message);
+  return data;
+}
+
 export async function saveProject(
   userId: string,
   name: string,

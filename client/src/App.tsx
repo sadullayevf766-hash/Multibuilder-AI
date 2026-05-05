@@ -11,8 +11,9 @@ import Preview from './pages/Preview';
 import DrawingSelect from './pages/DrawingSelect';
 
 // Lazy load heavy pages — code splitting
-const SuperGenerator = lazy(() => import('./pages/SuperGenerator'));
-const MegaBuilder    = lazy(() => import('./pages/MegaBuilder'));
+const SuperGenerator    = lazy(() => import('./pages/SuperGenerator'));
+const MegaBuilder       = lazy(() => import('./pages/MegaBuilder'));
+const MegaProjectDetail = lazy(() => import('./pages/MegaProjectDetail'));
 
 function PageLoader() {
   return (
@@ -57,6 +58,11 @@ function App() {
           <Route path="/mega" element={
             <ProtectedRoute>
               <Suspense fallback={<PageLoader />}><MegaBuilder /></Suspense>
+            </ProtectedRoute>
+          } />
+          <Route path="/mega/:id" element={
+            <ProtectedRoute>
+              <Suspense fallback={<PageLoader />}><MegaProjectDetail /></Suspense>
             </ProtectedRoute>
           } />
         </Routes>

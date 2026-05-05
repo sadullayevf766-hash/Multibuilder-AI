@@ -17,7 +17,7 @@ import { ArchitectureEngine } from './engine/ArchitectureEngine';
 import { DecorEngine } from './engine/DecorEngine';
 import { exportToDxf } from './export/DxfExporter';
 import { PdfExporter } from './export/PdfExporter';
-import { saveProject, getProjectHistory, getProject, renameProject, softDeleteProject, restoreProject, hardDeleteProject, getTrash, updateProjectDrawing } from './db/supabase';
+import { saveProject, getProjectHistory, getProject, renameProject, softDeleteProject, restoreProject, hardDeleteProject, getTrash, updateProjectDrawing, saveMegaProject, updateMegaProject } from './db/supabase';
 
 // Try loading from server/.env first, then fallback to .env in cwd
 dotenv.config({ path: join(process.cwd(), 'server', '.env') });
@@ -285,8 +285,8 @@ app.post('/api/mega/build', async (req, res) => {
         } else if (disc === 'decor') {
           const parsed = await geminiParser.parseDescriptionLocal(desc);
           results[disc] = 'rooms' in parsed
-            ? decorEngine.generateFromFloorPlan(parsed)
-            : decorEngine.generateFromRoom(parsed);
+            ? decorEngine.generate(desc)
+            : decorEngine.generate(desc);
         }
       } catch (e) {
         console.error(`[MEGA/BUILD] ${disc} xatolik:`, (e as Error).message);
@@ -312,6 +312,142 @@ app.post('/api/mega/edit', async (req, res) => {
   } catch (err) {
     console.error('[MEGA/EDIT] Error:', err);
     res.status(500).json({ error: 'Mega edit xatolik', message: (err as Error).message });
+  }
+});
+
+// ── Mega Builder: Save project ────────────────────────────────────────────────
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+app.post('/api/mega/save', async (req, res) => {
+  try {
+    const { userId, name, spec, generations, chatHistory, editHistory } = req.body;
+    if (!spec) return res.status(400).json({ error: 'spec required' });
+
+    // JWT token dan user ID olish (auth bypass uchun)
+    const authHeader = req.headers.authorization;
+    let resolvedUserId = userId;
+
+    if (!UUID_RE.test(resolvedUserId ?? '')) {
+      // userId invalid UUID — JWT dan olishga urinish
+      if (authHeader) {
+        try {
+          const { createClient } = await import('@supabase/supabase-js');
+          const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
+          const { data } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
+          resolvedUserId = data.user?.id;
+        } catch { /* ignore */ }
+      }
+    }
+
+    if (!resolvedUserId || !UUID_RE.test(resolvedUserId)) {
+      return res.status(401).json({ error: 'Foydalanuvchi autentifikatsiya qilinmagan. Iltimos, tizimga kiring.' });
+    }
+
+    const megaData = {
+      project_type: 'mega' as const,
+      spec, generations, chatHistory, editHistory,
+      savedAt: new Date().toISOString(),
+    };
+    const project = await saveMegaProject(
+      resolvedUserId,
+      name || `Mega loyiha — ${spec.floorCount}q ${spec.totalAreaM2}m²`,
+      megaData, authHeader
+    );
+    console.log('[MEGA/SAVE] saved:', project.id, 'user:', resolvedUserId);
+    return res.json(project);
+  } catch (err) {
+    console.error('[MEGA/SAVE] Error:', err);
+    res.status(500).json({ error: 'Mega loyihani saqlashda xatolik', message: (err as Error).message });
+  }
+});
+
+// ── Mega Builder: Update saved project ───────────────────────────────────────
+app.patch('/api/mega/project/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { spec, generations, chatHistory, editHistory } = req.body;
+    const authHeader = req.headers.authorization;
+    const megaData = {
+      project_type: 'mega' as const,
+      spec, generations, chatHistory, editHistory,
+      savedAt: new Date().toISOString(),
+    };
+    const project = await updateMegaProject(id, megaData, authHeader);
+    console.log('[MEGA/UPDATE] updated:', id);
+    return res.json(project);
+  } catch (err) {
+    console.error('[MEGA/UPDATE] Error:', err);
+    res.status(500).json({ error: 'Mega loyihani yangilashda xatolik', message: (err as Error).message });
+  }
+});
+
+// ── Mega Builder: Per-discipline AI edit + rebuild ───────────────────────────
+app.post('/api/mega/discipline-edit', async (req, res) => {
+  try {
+    const { discipline, message, spec, editHistory = [] } = req.body;
+    if (!discipline || !message || !spec) {
+      return res.status(400).json({ error: 'discipline, message, spec required' });
+    }
+    console.log(`[MEGA/DISC-EDIT] ${discipline}: ${message.slice(0, 60)}`);
+
+    // 1. AI dan yangi prompt olish
+    const result = await megaPlanner.classifyEdit(editHistory, message, spec);
+
+    // 2. Prompt yangilangan bo'lsa rebuild
+    const updatedSpec = result.specPatch
+      ? { ...spec, ...result.specPatch,
+          disciplinePrompts: { ...spec.disciplinePrompts, ...(result.specPatch.disciplinePrompts ?? {}) }
+        }
+      : spec;
+
+    const prompts = updatedSpec.disciplinePrompts ?? {};
+    const desc = prompts[discipline] || `${spec.floorCount} qavatli bino, ${spec.totalAreaM2}m². ${spec.buildingDescription}`;
+
+    let schema: unknown = null;
+    try {
+      if (discipline === 'warm-floor') {
+        const { parseWarmFloorRooms, WarmFloorEngine } = await import('./engine/WarmFloorEngine');
+        schema = new WarmFloorEngine().generate(parseWarmFloorRooms(desc));
+      } else if (discipline === 'water-supply') {
+        const { parseWaterRooms, WaterSupplyEngine } = await import('./engine/WaterSupplyEngine');
+        schema = new WaterSupplyEngine().generate(parseWaterRooms(desc));
+      } else if (discipline === 'sewage') {
+        const { parseSewageRooms, SewageEngine } = await import('./engine/SewageEngine');
+        schema = new SewageEngine().generate(parseSewageRooms(desc));
+      } else if (discipline === 'storm-drain') {
+        const { parseStormRooms, StormDrainEngine } = await import('./engine/StormDrainEngine');
+        schema = new StormDrainEngine().generate(parseStormRooms(desc));
+      } else if (discipline === 'boiler-room') {
+        schema = boilerRoomEngine.generate({
+          floors: spec.floorCount ?? 1, totalAreaM2: spec.totalAreaM2 ?? 200,
+          hasWarmFloor: spec.hasWarmFloor ?? false, hasWarmWall: spec.hasWarmWall ?? false,
+          hasHvs: spec.hasHvs ?? true,
+        });
+      } else if (discipline === 'facade') {
+        schema = facadeEngine.generate(parseFacadeInput(desc));
+      } else if (discipline === 'floor-plan') {
+        const parsed = await geminiParser.parseDescriptionLocal(desc);
+        schema = 'rooms' in parsed ? floorPlanEngine.generateFloorPlan(parsed) : floorPlanEngine.generateDrawing(parsed);
+      } else if (discipline === 'architecture') {
+        const parsed = await geminiParser.parseDescriptionLocal(desc);
+        schema = 'rooms' in parsed ? architectureEngine.generateFromFloorPlan(parsed) : architectureEngine.generateFromRoom(parsed);
+      } else if (discipline === 'electrical') {
+        const parsed = await geminiParser.parseDescriptionLocal(desc);
+        schema = 'rooms' in parsed ? electricalEngine.generateFromFloorPlan(parsed) : electricalEngine.generateFromRoom(parsed);
+      } else if (discipline === 'plumbing') {
+        schema = plumbingEngine.generate(desc);
+      } else if (discipline === 'decor') {
+        const parsed = await geminiParser.parseDescriptionLocal(desc);
+        schema = 'rooms' in parsed ? decorEngine.generate(desc) : decorEngine.generate(desc);
+      }
+    } catch (rebuildErr) {
+      console.error(`[MEGA/DISC-EDIT] rebuild xatolik:`, (rebuildErr as Error).message);
+    }
+
+    return res.json({ reply: result.reply, schema, updatedSpec });
+  } catch (err) {
+    console.error('[MEGA/DISC-EDIT] Error:', err);
+    res.status(500).json({ error: 'Mega disc edit xatolik', message: (err as Error).message });
   }
 });
 

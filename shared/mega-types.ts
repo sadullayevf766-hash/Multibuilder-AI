@@ -162,3 +162,24 @@ export function defaultSpec(): MegaProjectSpec {
     style: 'modern', language: 'uz', notes: '',
   };
 }
+
+// Saved mega project record (from Supabase, drawing_data field)
+export interface MegaSavedData {
+  project_type: 'mega';
+  spec:         MegaProjectSpec;
+  generations:  MegaGenerations;
+  chatHistory:  MegaChatMessage[];
+  editHistory:  MegaChatMessage[];
+  savedAt:      string;
+}
+
+// Full project row from DB
+export interface MegaProjectRecord {
+  id:           string;
+  user_id:      string;
+  name:         string;
+  drawing_data: MegaSavedData;
+  created_at:   string;
+  updated_at:   string;
+  deleted_at:   string | null;
+}
