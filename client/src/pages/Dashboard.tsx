@@ -1,3 +1,4 @@
+import { apiUrl } from '../lib/api';
 ﻿import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
@@ -64,7 +65,7 @@ export default function Dashboard() {
     try {
       setLoading(true);
       const headers = await getHeaders();
-      const res = await fetch(`/api/projects/${user!.id}`, { headers });
+      const res = await fetch(apiUrl(`/api/projects/${user!.id}`), { headers });
       if (!res.ok) throw new Error((await res.json()).message);
       setProjects(await res.json());
     } catch (err) {
@@ -75,7 +76,7 @@ export default function Dashboard() {
   const loadTrash = async () => {
     try {
       const headers = await getHeaders();
-      const res = await fetch(`/api/trash/${user!.id}`, { headers });
+      const res = await fetch(apiUrl(`/api/trash/${user!.id}`), { headers });
       if (!res.ok) return;
       setTrash(await res.json());
     } catch { /* silent */ }
@@ -86,7 +87,7 @@ export default function Dashboard() {
     setActionLoading(id);
     try {
       const headers = await getHeaders();
-      const res = await fetch(`/api/project/${id}/rename`, { method: 'PATCH', headers, body: JSON.stringify({ name: renameName.trim() }) });
+      const res = await fetch(apiUrl(`/api/project/${id}/rename`), { method: 'PATCH', headers, body: JSON.stringify({ name: renameName.trim() }) });
       if (!res.ok) throw new Error((await res.json()).message);
       setProjects(p => p.map(x => x.id === id ? { ...x, name: renameName.trim() } : x));
       setRenameId(null);
@@ -98,7 +99,7 @@ export default function Dashboard() {
     setActionLoading(id);
     try {
       const headers = await getHeaders();
-      const res = await fetch(`/api/project/${id}`, { method: 'DELETE', headers });
+      const res = await fetch(apiUrl(`/api/project/${id}`), { method: 'DELETE', headers });
       if (!res.ok) throw new Error((await res.json()).message);
       const moved = projects.find(p => p.id === id);
       setProjects(p => p.filter(x => x.id !== id));
@@ -111,7 +112,7 @@ export default function Dashboard() {
     setActionLoading(id);
     try {
       const headers = await getHeaders();
-      const res = await fetch(`/api/project/${id}/restore`, { method: 'PATCH', headers });
+      const res = await fetch(apiUrl(`/api/project/${id}/restore`), { method: 'PATCH', headers });
       if (!res.ok) throw new Error((await res.json()).message);
       const restored = trash.find(p => p.id === id);
       setTrash(t => t.filter(x => x.id !== id));
@@ -125,7 +126,7 @@ export default function Dashboard() {
     setActionLoading(id);
     try {
       const headers = await getHeaders();
-      const res = await fetch(`/api/project/${id}/permanent`, { method: 'DELETE', headers });
+      const res = await fetch(apiUrl(`/api/project/${id}/permanent`), { method: 'DELETE', headers });
       if (!res.ok) throw new Error((await res.json()).message);
       setTrash(t => t.filter(x => x.id !== id));
     } catch (err) { setError(err instanceof Error ? err.message : 'Xatolik'); }

@@ -1,3 +1,4 @@
+import { apiUrl } from '../lib/api';
 import { useState, useRef, useEffect } from 'react';
 import Canvas2D, { type Canvas2DHandle } from '../components/Canvas2D';
 import AxonometricCanvas from '../components/AxonometricCanvas';
@@ -149,35 +150,35 @@ export default function Preview() {
 
     try {
       if (tc.kind === 'elec-room') {
-        const res = await fetch('/api/generate-electrical', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomSpec: tc.roomSpec }) });
+        const res = await fetch(apiUrl('/api/generate-electrical'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomSpec: tc.roomSpec }) });
         if (!res.ok) throw new Error('API xatolik');
         setElectricalData((await res.json()).electricalData);
 
       } else if (tc.kind === 'elec-fp') {
-        const res = await fetch('/api/generate-electrical', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ floorPlan: tc.floorPlan }) });
+        const res = await fetch(apiUrl('/api/generate-electrical'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ floorPlan: tc.floorPlan }) });
         if (!res.ok) throw new Error('API xatolik');
         setElectricalData((await res.json()).electricalData);
 
       } else if (tc.kind === 'arch-room') {
-        const res = await fetch('/api/generate-architecture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomSpec: tc.roomSpec }) });
+        const res = await fetch(apiUrl('/api/generate-architecture'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ roomSpec: tc.roomSpec }) });
         if (!res.ok) throw new Error('API xatolik');
         setArchData((await res.json()).archData);
         setArchView('fasad-1');
 
       } else if (tc.kind === 'arch-fp') {
-        const res = await fetch('/api/generate-architecture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ floorPlan: tc.floorPlan }) });
+        const res = await fetch(apiUrl('/api/generate-architecture'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ floorPlan: tc.floorPlan }) });
         if (!res.ok) throw new Error('API xatolik');
         setArchData((await res.json()).archData);
         setArchView('fasad-1');
 
       } else if (tc.kind === 'decor') {
-        const res = await fetch('/api/generate-decor', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description: tc.desc }) });
+        const res = await fetch(apiUrl('/api/generate-decor'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description: tc.desc }) });
         if (!res.ok) throw new Error('API xatolik');
         setDecorData((await res.json()).decorSchema);
         setDecorView('2d');
 
       } else {
-        const res = await fetch('/api/generate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description: tc.desc, drawingType: tc.kind === 'plumbing' ? 'plumbing-axonometric' : 'floor-plan' }) });
+        const res = await fetch(apiUrl('/api/generate'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ description: tc.desc, drawingType: tc.kind === 'plumbing' ? 'plumbing-axonometric' : 'floor-plan' }) });
         if (!res.ok) throw new Error('API xatolik');
         setDrawingData((await res.json()).drawingData);
       }

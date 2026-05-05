@@ -1,3 +1,4 @@
+import { apiUrl } from '../lib/api';
 ﻿import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, Link } from "react-router-dom";
 import Canvas2D, { type Canvas2DHandle } from "../components/Canvas2D";
@@ -77,7 +78,7 @@ export default function Project() {
   const loadProject = async () => {
     try {
       const headers = await getAuthHeaders();
-      const res = await fetch(`/api/project/${id}`, { headers });
+      const res = await fetch(apiUrl(`/api/project/${id}`), { headers });
       if (!res.ok) throw new Error("Loyihani yuklashda xatolik");
       const data = await res.json();
       setProject(data); setMessages2d(data.messages || []);
@@ -94,7 +95,7 @@ export default function Project() {
     try {
       setEditState2d("generating");
       const headers = await getAuthHeaders();
-      const res = await fetch(`/api/project/${id}/drawing`, { method: "PATCH", headers, body: JSON.stringify({ userMessage, history: prev, currentDrawingData: currentData }) });
+      const res = await fetch(apiUrl(`/api/project/${id}/drawing`), { method: "PATCH", headers, body: JSON.stringify({ userMessage, history: prev, currentDrawingData: currentData }) });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Xatolik"); }
       setEditState2d("saving");
       const updated = await res.json();
@@ -112,7 +113,7 @@ export default function Project() {
     try {
       setEditState3d("generating");
       const headers = await getAuthHeaders();
-      const res = await fetch(`/api/project/${id}/drawing`, { method: "PATCH", headers, body: JSON.stringify({ userMessage, history: prev, currentDrawingData: currentData3d }) });
+      const res = await fetch(apiUrl(`/api/project/${id}/drawing`), { method: "PATCH", headers, body: JSON.stringify({ userMessage, history: prev, currentDrawingData: currentData3d }) });
       if (!res.ok) { const d = await res.json(); throw new Error(d.message || "Xatolik"); }
       setEditState3d("saving");
       const updated = await res.json();
@@ -124,7 +125,7 @@ export default function Project() {
   const handleDownloadDxf = async () => {
     if (!project) return;
     try {
-      const res = await fetch("/api/export/dxf", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ drawingData: project.drawing_data }) });
+      const res = await fetch(apiUrl("/api/export/dxf"), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ drawingData: project.drawing_data }) });
       if (!res.ok) throw new Error();
       const blob = await res.blob(); const url = window.URL.createObjectURL(blob);
       const a = document.createElement("a"); a.href = url; a.download = `${project.name}.dxf`; a.click();

@@ -1,3 +1,4 @@
+import { apiUrl } from '../lib/api';
 /**
  * MegaProjectDetail — saqlangan Mega loyihani ko'rish va tahrirlash
  *
@@ -98,7 +99,7 @@ function DisciplineEditor({
     setLoading(true);
 
     try {
-      const res = await fetch('/api/mega/discipline-edit', {
+      const res = await fetch(apiUrl('/api/mega/discipline-edit'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -251,7 +252,7 @@ export default function MegaProjectDetail() {
       try {
         setLoading(true);
         const headers = await getHeaders();
-        const res = await fetch(`/api/project/${id}`, { headers });
+        const res = await fetch(apiUrl(`/api/project/${id}`), { headers });
         if (!res.ok) throw new Error((await res.json()).message);
         const project = await res.json();
         const data = project.drawing_data as MegaSavedData;
@@ -288,7 +289,7 @@ export default function MegaProjectDetail() {
         spec, generations: gens,
         savedAt: new Date().toISOString(),
       };
-      const res = await fetch(`/api/mega/project/${id}`, {
+      const res = await fetch(apiUrl(`/api/mega/project/${id}`), {
         method: 'PATCH',
         headers,
         body: JSON.stringify({ spec, generations: gens, chatHistory: megaData.chatHistory, editHistory: megaData.editHistory }),

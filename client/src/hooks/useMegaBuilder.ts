@@ -1,3 +1,4 @@
+import { apiUrl } from '../lib/api';
 /**
  * useMegaBuilder — Mega Builder 3 bosqich holat boshqaruvi
  * Plan → Build → Review/Edit
@@ -100,7 +101,7 @@ export function useMegaBuilder(): MegaBuilderHook {
     setChatHistory(newHistory);
 
     try {
-      const data = await apiFetch('/api/mega/chat', {
+      const data = await apiFetch(apiUrl('/api/mega/chat'), {
         history: chatHistory,
         message: text,
       });
@@ -158,7 +159,7 @@ export function useMegaBuilder(): MegaBuilderHook {
     await Promise.all(discs.map(async (d) => {
       try {
         const partialSpec = { ...currentSpec, disciplines: [d] };
-        const data = await apiFetch('/api/mega/build', { spec: partialSpec });
+        const data = await apiFetch(apiUrl('/api/mega/build'), { spec: partialSpec });
         const schema = data.results?.[d];
         if (schema !== undefined && schema !== null) {
           updateDisc(d, { status: 'done', schema, generatedAt: Date.now() });
@@ -187,7 +188,7 @@ export function useMegaBuilder(): MegaBuilderHook {
 
     try {
       const partialSpec = { ...currentSpec, disciplines: [disc] };
-      const data = await apiFetch('/api/mega/build', { spec: partialSpec });
+      const data = await apiFetch(apiUrl('/api/mega/build'), { spec: partialSpec });
       const schema = data.results?.[disc];
       if (schema) {
         updateDisc(disc, { status: 'done', schema, generatedAt: Date.now() });
@@ -209,7 +210,7 @@ export function useMegaBuilder(): MegaBuilderHook {
     setEditHistory(h => [...h, userMsg]);
 
     try {
-      const data = await apiFetch('/api/mega/edit', {
+      const data = await apiFetch(apiUrl('/api/mega/edit'), {
         editHistory,
         message:  text,
         spec:     currentSpec,
@@ -264,7 +265,7 @@ export function useMegaBuilder(): MegaBuilderHook {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
-      const res = await fetch('/api/mega/save', {
+      const res = await fetch(apiUrl('/api/mega/save'), {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -296,7 +297,7 @@ export function useMegaBuilder(): MegaBuilderHook {
     try {
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
-      await fetch(`/api/mega/project/${savedProjectId}`, {
+      await fetch(apiUrl(`/api/mega/project/${savedProjectId}`), {
         method: 'PATCH',
         headers,
         body: JSON.stringify({ spec: currentSpec, generations, chatHistory, editHistory }),

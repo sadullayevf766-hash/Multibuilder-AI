@@ -1,3 +1,4 @@
+import { apiUrl } from '../lib/api';
 import { useRef, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
@@ -471,7 +472,7 @@ export default function SuperGenerator() {
                           superType === 'sewage'       ? sewageSchema :
                           superType === 'boiler-room'  ? boilerSchema :
                           superType === 'facade'       ? facadeSchema : stormSchema;
-      const res = await fetch('/api/projects', {
+      const res = await fetch(apiUrl('/api/projects'), {
         method: 'POST', headers,
         body: JSON.stringify({ userId: user.id, name: meta.label, type: superType, drawingData }),
       });

@@ -1,3 +1,4 @@
+import { apiUrl } from '../lib/api';
 import { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Canvas2D, { type Canvas2DHandle } from '../components/Canvas2D';
@@ -163,7 +164,7 @@ export default function Generator() {
 
       // ── Multi-floor building ───────────────────────────────────────────────
       if (drawingType === 'floor-plan' && isMultiFloorDesc(description)) {
-        const response = await fetch('/api/generate-building', {
+        const response = await fetch(apiUrl('/api/generate-building'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ description }),
@@ -187,13 +188,13 @@ export default function Generator() {
       // ── Standard single-type generation ───────────────────────────────────
       let response: Response;
       if (drawingType === 'decor') {
-        response = await fetch('/api/generate-decor', {
+        response = await fetch(apiUrl('/api/generate-decor'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ description }),
         });
       } else {
-        response = await fetch('/api/generate', {
+        response = await fetch(apiUrl('/api/generate'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ description, drawingType }),
@@ -240,7 +241,7 @@ export default function Generator() {
       setShowNameDialog(false);
       const { data: { session } } = await supabase.auth.getSession();
       if (!session) { navigate('/login'); return; }
-      const response = await fetch('/api/projects', {
+      const response = await fetch(apiUrl('/api/projects'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${session.access_token}` },
         body: JSON.stringify({ userId: user.id, name: projectName, description, drawingData: pendingDrawing }),
@@ -259,7 +260,7 @@ export default function Generator() {
   const handleDownloadDxf = async () => {
     if (!drawingData) return;
     try {
-      const response = await fetch('/api/export/dxf', {
+      const response = await fetch(apiUrl('/api/export/dxf'), {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ drawingData }),
       });
