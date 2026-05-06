@@ -1,6 +1,7 @@
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { Suspense, lazy } from 'react';
 import { AuthProvider, ProtectedRoute } from './lib/auth';
+import { CreditsProvider } from './lib/credits';
 import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
@@ -9,6 +10,7 @@ import Project from './pages/Project';
 import Generator from './pages/Generator';
 import Preview from './pages/Preview';
 import DrawingSelect from './pages/DrawingSelect';
+import Pricing from './pages/Pricing';
 
 // Lazy load heavy pages — code splitting
 const SuperGenerator    = lazy(() => import('./pages/SuperGenerator'));
@@ -32,6 +34,7 @@ function App() {
       }}
     >
       <AuthProvider>
+        <CreditsProvider>
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/login" element={<Login />} />
@@ -46,6 +49,7 @@ function App() {
             <ProtectedRoute><Generator /></ProtectedRoute>
           } />
           <Route path="/preview" element={<Preview />} />
+          <Route path="/pricing" element={<Pricing />} />
           {/* Yangi drawing tanlash + Super Generator */}
           <Route path="/select" element={
             <ProtectedRoute><DrawingSelect /></ProtectedRoute>
@@ -66,6 +70,7 @@ function App() {
             </ProtectedRoute>
           } />
         </Routes>
+        </CreditsProvider>
       </AuthProvider>
     </BrowserRouter>
   );

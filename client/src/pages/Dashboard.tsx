@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth, useSignOut } from '../lib/auth';
 import { supabase } from '../lib/supabase';
+import { useCredits } from '../hooks/useCredits';
 
 interface Project {
   id: string;
@@ -32,6 +33,7 @@ export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const handleSignOut = useSignOut();
+  const { profile: creditProfile } = useCredits();
   const [tab, setTab] = useState<Tab>('projects');
   const [projects, setProjects] = useState<Project[]>([]);
   const [trash, setTrash] = useState<Project[]>([]);
@@ -144,7 +146,25 @@ export default function Dashboard() {
             <span className="hidden md:block w-px h-4 bg-white/10" />
             <span className="hidden md:block text-xs text-white/30">{user?.email}</span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            {creditProfile && (
+              <Link to="/pricing"
+                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/[0.04] border border-white/10 hover:border-orange-500/30 transition-all">
+                <span className="text-sm">⚡</span>
+                <span className="text-sm font-semibold text-white">{creditProfile.credits}</span>
+                <span className="text-xs text-white/30">credit</span>
+                {creditProfile.plan_id !== 'free' && (
+                  <span className="ml-1 px-1.5 py-0.5 rounded bg-orange-500/20 text-orange-400 text-[9px] font-bold uppercase">
+                    {creditProfile.plan_id}
+                  </span>
+                )}
+                {creditProfile.plan_id === 'free' && creditProfile.credits < 10 && (
+                  <span className="ml-1 px-1.5 py-0.5 rounded bg-red-500/20 text-red-400 text-[9px] font-bold">
+                    Kam!
+                  </span>
+                )}
+              </Link>
+            )}
             <Link to="/select"
               className="flex items-center gap-1.5 bg-orange-600 hover:bg-orange-500 text-white px-3.5 py-1.5 rounded-lg text-sm font-medium transition-colors shadow-sm shadow-orange-500/20">
               <span className="text-base leading-none">+</span>

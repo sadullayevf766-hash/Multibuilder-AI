@@ -18,6 +18,8 @@ import { DecorEngine } from './engine/DecorEngine';
 import { exportToDxf } from './export/DxfExporter';
 import { PdfExporter } from './export/PdfExporter';
 import { saveProject, getProjectHistory, getProject, renameProject, softDeleteProject, restoreProject, hardDeleteProject, getTrash, updateProjectDrawing, saveMegaProject, updateMegaProject } from './db/supabase';
+import { requireCredits, getUserProfile, deductCredits } from './credits/middleware';
+import { CREDIT_COSTS } from './credits/config';
 
 // Try loading from server/.env first, then fallback to .env in cwd
 dotenv.config({ path: join(process.cwd(), 'server', '.env') });
@@ -59,7 +61,60 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.post('/api/generate', async (req, res) => {
+// ── Credits API ───────────────────────────────────────────────────
+// User profil + credit balans
+app.get('/api/credits/profile', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { createClient } = await import('@supabase/supabase-js');
+    const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
+    const { data: { user } } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const profile = await getUserProfile(user.id);
+    if (!profile) {
+      // Profil yo'q — yangi yaratish (trigger ishlamagan bo'lsa)
+      await sb.from('profiles').upsert({
+        id: user.id, email: user.email, plan_id: 'free', credits: 30,
+        credits_reset_at: new Date(Date.now() + 7 * 86400000).toISOString(),
+      }, { onConflict: 'id', ignoreDuplicates: true });
+      const newProfile = await getUserProfile(user.id);
+      return res.json(newProfile);
+    }
+
+    res.json({ ...profile, costs: CREDIT_COSTS });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// Credit transaction tarixi
+app.get('/api/credits/history', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { createClient } = await import('@supabase/supabase-js');
+    const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
+    const { data: { user } } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { data } = await sb
+      .from('credit_transactions')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    res.json(data ?? []);
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+app.post('/api/generate', requireCredits('simple_generate'), async (req, res) => {
   try {
     const { description, drawingType, floorCount } = req.body;
 
@@ -121,7 +176,7 @@ app.post('/api/generate', async (req, res) => {
 });
 
 // ── Super Drawing: Issiq pol isitish tizimi ───────────────────────────────────
-app.post('/api/generate-warm-floor', async (req, res) => {
+app.post('/api/generate-warm-floor', requireCredits('super_generate'), async (req, res) => {
   try {
     const { description } = req.body;
     console.log('[WARM-FLOOR] description:', (description || '').slice(0, 80));
@@ -138,7 +193,7 @@ app.post('/api/generate-warm-floor', async (req, res) => {
 });
 
 // ── Suv ta'minoti sxemasi ─────────────────────────────────────────────────────
-app.post('/api/generate-water-supply', async (req, res) => {
+app.post('/api/generate-water-supply', requireCredits('super_generate'), async (req, res) => {
   try {
     const { description } = req.body;
     console.log('[WATER-SUPPLY] description:', (description || '').slice(0, 80));
@@ -153,7 +208,7 @@ app.post('/api/generate-water-supply', async (req, res) => {
 });
 
 // ── Kanalizatsiya sxemasi ─────────────────────────────────────────────────────
-app.post('/api/generate-sewage', async (req, res) => {
+app.post('/api/generate-sewage', requireCredits('super_generate'), async (req, res) => {
   try {
     const { description } = req.body;
     console.log('[SEWAGE] description:', (description || '').slice(0, 80));
@@ -168,7 +223,7 @@ app.post('/api/generate-sewage', async (req, res) => {
 });
 
 // ── Ливнёвка (yomg'ir suvi kanalizatsiyasi) ──────────────────────────────────
-app.post('/api/generate-storm-drain', async (req, res) => {
+app.post('/api/generate-storm-drain', requireCredits('super_generate'), async (req, res) => {
   try {
     const { description } = req.body;
     console.log('[STORM-DRAIN] description:', (description || '').slice(0, 80));
@@ -183,7 +238,7 @@ app.post('/api/generate-storm-drain', async (req, res) => {
 });
 
 // ── Qozonxona (Котельная) ────────────────────────────────────────────────────
-app.post('/api/generate-boiler-room', async (req, res) => {
+app.post('/api/generate-boiler-room', requireCredits('super_generate'), async (req, res) => {
   try {
     const { description } = req.body;
     console.log('[BOILER-ROOM] description:', (description || '').slice(0, 80));
@@ -221,7 +276,7 @@ app.post('/api/mega/chat', async (req, res) => {
 });
 
 // ── Mega Builder: Build all disciplines ───────────────────────────────────────
-app.post('/api/mega/build', async (req, res) => {
+app.post('/api/mega/build', requireCredits('mega_build'), async (req, res) => {
   try {
     const { spec } = req.body;
     if (!spec) return res.status(400).json({ error: 'spec required' });
@@ -382,7 +437,7 @@ app.patch('/api/mega/project/:id', async (req, res) => {
 });
 
 // ── Mega Builder: Per-discipline AI edit + rebuild ───────────────────────────
-app.post('/api/mega/discipline-edit', async (req, res) => {
+app.post('/api/mega/discipline-edit', requireCredits('mega_edit'), async (req, res) => {
   try {
     const { discipline, message, spec, editHistory = [] } = req.body;
     if (!discipline || !message || !spec) {
@@ -752,7 +807,7 @@ app.post('/api/generate-electrical', (req, res) => {
 });
 
 // ── Facade generation ─────────────────────────────────────────────────────────
-app.post('/api/generate-facade', async (req, res) => {
+app.post('/api/generate-facade', requireCredits('super_generate'), async (req, res) => {
   try {
     const { description } = req.body;
     if (!description) return res.status(400).json({ error: 'description required' });
