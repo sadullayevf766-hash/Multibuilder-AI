@@ -1,18 +1,22 @@
-import Stripe from 'stripe';
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { createClient } from '@supabase/supabase-js';
 
+// Stripe ni dynamic require — type deklaratsiyasiz ishlaydi
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const StripeLib = require('stripe');
+
 // ── Stripe client (lazy) ──────────────────────────────────────────
-let _stripe: InstanceType<typeof Stripe> | null = null;
-export function getStripe(): InstanceType<typeof Stripe> {
+let _stripe: any = null;
+
+export function getStripe(): any {
   if (_stripe) return _stripe;
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error('STRIPE_SECRET_KEY not set');
-  _stripe = new Stripe(key);
+  _stripe = new StripeLib(key);
   return _stripe;
 }
 
 // ── Plan → Stripe Price ID mapping ───────────────────────────────
-// Stripe Dashboard → Products → Pro/Business → Copy Price ID
 export const STRIPE_PRICES: Record<string, { monthly: string; yearly: string }> = {
   pro: {
     monthly: process.env.STRIPE_PRICE_PRO_MONTHLY ?? '',
@@ -24,7 +28,6 @@ export const STRIPE_PRICES: Record<string, { monthly: string; yearly: string }> 
   },
 };
 
-// Har plan uchun berilgan credit
 const PLAN_CREDITS: Record<string, number> = {
   pro:      500,
   business: 2000,
@@ -34,7 +37,6 @@ function getSb() {
   return createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
 }
 
-// Plan yoqish — checkout.session.completed da chaqiriladi
 export async function upgradePlan(
   userId: string,
   planId: 'pro' | 'business',
@@ -63,7 +65,6 @@ export async function upgradePlan(
   });
 }
 
-// Plan o'chirish — subscription cancelled da
 export async function downgradePlan(userId: string) {
   const sb = getSb();
   await sb.from('profiles').update({
@@ -74,7 +75,6 @@ export async function downgradePlan(userId: string) {
   }).eq('id', userId);
 }
 
-// Oylik credit yangilash — invoice.paid (subscription_cycle) da
 export async function renewCredits(userId: string, planId: string) {
   const sb = getSb();
   const credits = PLAN_CREDITS[planId] ?? 500;
