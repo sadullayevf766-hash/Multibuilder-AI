@@ -1,7 +1,7 @@
 import { apiUrl } from '../lib/api';
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useAuth } from '../lib/auth';
+import { useAuth, useSignOut } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 
 interface Project {
@@ -29,8 +29,9 @@ const DISC_ICONS: Record<string, string> = {
 type Tab = 'projects' | 'trash';
 
 export default function Dashboard() {
-  const { user, signOut } = useAuth();
+  const { user } = useAuth();
   const navigate = useNavigate();
+  const handleSignOut = useSignOut();
   const [tab, setTab] = useState<Tab>('projects');
   const [projects, setProjects] = useState<Project[]>([]);
   const [trash, setTrash] = useState<Project[]>([]);
@@ -121,7 +122,6 @@ export default function Dashboard() {
     finally { setActionLoading(null); }
   };
 
-  const handleSignOut = async () => { await signOut(); navigate('/login'); };
 
   return (
     <div className="min-h-screen bg-[#080810] text-white">
