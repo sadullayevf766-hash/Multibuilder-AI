@@ -20,7 +20,7 @@ import { PdfExporter } from './export/PdfExporter';
 import { saveProject, getProjectHistory, getProject, renameProject, softDeleteProject, restoreProject, hardDeleteProject, getTrash, updateProjectDrawing, saveMegaProject, updateMegaProject } from './db/supabase';
 import { requireCredits, getUserProfile, deductCredits } from './credits/middleware';
 import { CREDIT_COSTS } from './credits/config';
-import { getStripe, STRIPE_PRICES, upgradePlan, downgradePlan, renewCredits } from './payments/stripe';
+import { STRIPE_PRICES, upgradePlan, downgradePlan, renewCredits, findOrCreateCustomer, createCheckoutSession, createPortalSession, verifyWebhookSignature } from './payments/stripe';
 
 // Try loading from server/.env first, then fallback to .env in cwd
 dotenv.config({ path: join(process.cwd(), 'server', '.env') });
@@ -76,11 +76,8 @@ app.post('/api/payments/checkout', async (req, res) => {
     const authHeader = req.headers.authorization;
     if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
 
-    const stripe = getStripe();
     const { createClient } = await import('@supabase/supabase-js');
     const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
-
-    // JWT dan user olish
     const { data: { user } } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
@@ -90,79 +87,34 @@ app.post('/api/payments/checkout', async (req, res) => {
     const priceId = STRIPE_PRICES[plan]?.[billing];
     if (!priceId) return res.status(400).json({ error: `Price ID sozlanmagan: ${plan}/${billing}` });
 
-    // Mavjud customer bormi?
-    const { data: profile } = await sb
-      .from('profiles')
-      .select('stripe_customer_id')
-      .eq('id', user.id)
-      .single();
-
-    let customerId = profile?.stripe_customer_id as string | undefined;
-
-    if (!customerId) {
-      const customer = await stripe.customers.create({
-        email: user.email,
-        metadata: { supabase_user_id: user.id },
-      });
-      customerId = customer.id;
-      await sb.from('profiles').update({ stripe_customer_id: customerId }).eq('id', user.id);
-    }
-
+    const customerId = await findOrCreateCustomer(user.id, user.email ?? '');
     const appUrl = process.env.APP_URL ?? 'http://localhost:3000';
+    const url = await createCheckoutSession(customerId, priceId, user.id, plan, appUrl);
 
-    const session = await stripe.checkout.sessions.create({
-      customer:            customerId,
-      payment_method_types: ['card'],
-      line_items: [{ price: priceId, quantity: 1 }],
-      mode:                'subscription',
-      success_url:         `${appUrl}/dashboard?payment=success&plan=${plan}`,
-      cancel_url:          `${appUrl}/pricing?payment=cancelled`,
-      metadata: {
-        supabase_user_id: user.id,
-        plan,
-      },
-      subscription_data: {
-        metadata: { supabase_user_id: user.id, plan },
-      },
-    });
-
-    res.json({ url: session.url, sessionId: session.id });
+    res.json({ url });
   } catch (err) {
     console.error('[STRIPE/CHECKOUT]', err);
     res.status(500).json({ error: (err as Error).message });
   }
 });
 
-// 2. Customer portal (obunani boshqarish, bekor qilish)
+// 2. Customer portal
 app.post('/api/payments/portal', async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
     if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
 
-    const stripe = getStripe();
     const { createClient } = await import('@supabase/supabase-js');
     const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
-
     const { data: { user } } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
 
-    const { data: profile } = await sb
-      .from('profiles')
-      .select('stripe_customer_id')
-      .eq('id', user.id)
-      .single();
-
-    if (!profile?.stripe_customer_id) {
-      return res.status(400).json({ error: 'Stripe obuna topilmadi' });
-    }
+    const { data: profile } = await sb.from('profiles').select('stripe_customer_id').eq('id', user.id).single();
+    if (!profile?.stripe_customer_id) return res.status(400).json({ error: 'Stripe obuna topilmadi' });
 
     const appUrl = process.env.APP_URL ?? 'http://localhost:3000';
-    const portalSession = await stripe.billingPortal.sessions.create({
-      customer:   profile.stripe_customer_id as string,
-      return_url: `${appUrl}/dashboard`,
-    });
-
-    res.json({ url: portalSession.url });
+    const url = await createPortalSession(profile.stripe_customer_id as string, appUrl);
+    res.json({ url });
   } catch (err) {
     console.error('[STRIPE/PORTAL]', err);
     res.status(500).json({ error: (err as Error).message });
@@ -182,8 +134,7 @@ app.post('/api/payments/webhook', async (req, res) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let event: any;
   try {
-    const stripe = getStripe();
-    event = stripe.webhooks.constructEvent(req.body, sig, secret);
+    event = verifyWebhookSignature(req.body as Buffer, sig, secret);
   } catch (err) {
     console.error('[WEBHOOK] Signature verification failed:', (err as Error).message);
     return res.status(400).json({ error: 'Invalid signature' });
