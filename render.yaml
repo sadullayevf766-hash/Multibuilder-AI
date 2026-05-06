@@ -4,8 +4,8 @@ services:
     env: node
     region: oregon
     plan: free
-    buildCommand: "NODE_ENV=development npm install --legacy-peer-deps && (cd client && ../node_modules/.bin/vite build) && npm run build --workspace=server"
-    startCommand: NODE_PATH=./node_modules node server/dist/server/src/index.js
+    buildCommand: "NODE_ENV=development npm install --legacy-peer-deps && npm install --prefix server --legacy-peer-deps && (cd client && ../node_modules/.bin/vite build) && npm run build --workspace=server"
+    startCommand: node server/dist/server/src/index.js
     envVars:
       - key: NODE_ENV
         value: production
