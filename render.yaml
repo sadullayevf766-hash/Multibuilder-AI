@@ -19,3 +19,17 @@ services:
         sync: false
       - key: SUPABASE_SERVICE_KEY
         sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PRICE_PRO_MONTHLY
+        sync: false
+      - key: STRIPE_PRICE_PRO_YEARLY
+        sync: false
+      - key: STRIPE_PRICE_BIZ_MONTHLY
+        sync: false
+      - key: STRIPE_PRICE_BIZ_YEARLY
+        sync: false
+      - key: APP_URL
+        value: https://multibuilder-ai.onrender.com
