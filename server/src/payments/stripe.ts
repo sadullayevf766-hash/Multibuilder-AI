@@ -1,17 +1,17 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { createClient } from '@supabase/supabase-js';
+import { createRequire } from 'module';
 
-// Stripe ni dynamic require — type deklaratsiyasiz ishlaydi
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const StripeLib = require('stripe');
-
-// ── Stripe client (lazy) ──────────────────────────────────────────
+// ── Stripe client (truly lazy — loaded only when first called) ────
 let _stripe: any = null;
 
 export function getStripe(): any {
   if (_stripe) return _stripe;
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) throw new Error('STRIPE_SECRET_KEY not set');
+  // Use createRequire to resolve stripe relative to this file at runtime
+  const req = createRequire(__filename);
+  const StripeLib = req('stripe');
   _stripe = new StripeLib(key);
   return _stripe;
 }
