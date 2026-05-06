@@ -33,7 +33,19 @@ export default function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const handleSignOut = useSignOut();
-  const { profile: creditProfile } = useCredits();
+  const { profile: creditProfile, refresh: refreshCredits } = useCredits();
+  const [paySuccess, setPaySuccess] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('payment') === 'success') {
+      setPaySuccess(true);
+      refreshCredits();
+      // URL ni tozalash
+      window.history.replaceState({}, '', '/dashboard');
+      setTimeout(() => setPaySuccess(false), 5000);
+    }
+  }, [refreshCredits]);
   const [tab, setTab] = useState<Tab>('projects');
   const [projects, setProjects] = useState<Project[]>([]);
   const [trash, setTrash] = useState<Project[]>([]);
@@ -179,6 +191,18 @@ export default function Dashboard() {
       </header>
 
       <main className="relative z-10 max-w-7xl mx-auto px-4 md:px-8 py-10">
+
+        {/* Payment success banner */}
+        {paySuccess && (
+          <div className="mb-6 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl px-6 py-4 flex items-center gap-4">
+            <span className="text-2xl">🎉</span>
+            <div>
+              <p className="text-emerald-400 font-semibold text-sm">Tabriklaymiz! Plan muvaffaqiyatli aktivlashtirildi.</p>
+              <p className="text-emerald-400/60 text-xs mt-0.5">Creditlaringiz yangilandi. Endi barcha imkoniyatlar ochiq!</p>
+            </div>
+            <button onClick={() => setPaySuccess(false)} className="ml-auto text-emerald-400/40 hover:text-emerald-400">✕</button>
+          </div>
+        )}
 
         {/* Page title */}
         <div className="mb-8 flex items-end justify-between">

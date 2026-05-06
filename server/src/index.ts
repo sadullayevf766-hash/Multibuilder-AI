@@ -20,6 +20,7 @@ import { PdfExporter } from './export/PdfExporter';
 import { saveProject, getProjectHistory, getProject, renameProject, softDeleteProject, restoreProject, hardDeleteProject, getTrash, updateProjectDrawing, saveMegaProject, updateMegaProject } from './db/supabase';
 import { requireCredits, getUserProfile, deductCredits } from './credits/middleware';
 import { CREDIT_COSTS } from './credits/config';
+import { getStripe, STRIPE_PRICES, upgradePlan, downgradePlan, renewCredits } from './payments/stripe';
 
 // Try loading from server/.env first, then fallback to .env in cwd
 dotenv.config({ path: join(process.cwd(), 'server', '.env') });
@@ -29,6 +30,10 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 app.use(cors());
+
+// Stripe webhook — raw body kerak (json parser dan OLDIN)
+app.use('/api/payments/webhook', express.raw({ type: 'application/json' }));
+
 app.use(express.json({ limit: '10mb' }));
 
 // Serve client static files in production
@@ -58,7 +63,214 @@ const decorEngine = new DecorEngine();
 const pdfExporter = new PdfExporter();
 
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'ok' });
+  res.json({ status: 'ok', stripe: !!process.env.STRIPE_SECRET_KEY });
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// STRIPE PAYMENTS
+// ═══════════════════════════════════════════════════════════════════
+
+// 1. Checkout session yaratish
+app.post('/api/payments/checkout', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
+
+    const stripe = getStripe();
+    const { createClient } = await import('@supabase/supabase-js');
+    const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
+
+    // JWT dan user olish
+    const { data: { user } } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { plan, billing } = req.body as { plan: 'pro' | 'business'; billing: 'monthly' | 'yearly' };
+    if (!plan || !billing) return res.status(400).json({ error: 'plan va billing kerak' });
+
+    const priceId = STRIPE_PRICES[plan]?.[billing];
+    if (!priceId) return res.status(400).json({ error: `Price ID sozlanmagan: ${plan}/${billing}` });
+
+    // Mavjud customer bormi?
+    const { data: profile } = await sb
+      .from('profiles')
+      .select('stripe_customer_id')
+      .eq('id', user.id)
+      .single();
+
+    let customerId = profile?.stripe_customer_id as string | undefined;
+
+    if (!customerId) {
+      const customer = await stripe.customers.create({
+        email: user.email,
+        metadata: { supabase_user_id: user.id },
+      });
+      customerId = customer.id;
+      await sb.from('profiles').update({ stripe_customer_id: customerId }).eq('id', user.id);
+    }
+
+    const appUrl = process.env.APP_URL ?? 'http://localhost:3000';
+
+    const session = await stripe.checkout.sessions.create({
+      customer:            customerId,
+      payment_method_types: ['card'],
+      line_items: [{ price: priceId, quantity: 1 }],
+      mode:                'subscription',
+      success_url:         `${appUrl}/dashboard?payment=success&plan=${plan}`,
+      cancel_url:          `${appUrl}/pricing?payment=cancelled`,
+      metadata: {
+        supabase_user_id: user.id,
+        plan,
+      },
+      subscription_data: {
+        metadata: { supabase_user_id: user.id, plan },
+      },
+    });
+
+    res.json({ url: session.url, sessionId: session.id });
+  } catch (err) {
+    console.error('[STRIPE/CHECKOUT]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 2. Customer portal (obunani boshqarish, bekor qilish)
+app.post('/api/payments/portal', async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader) return res.status(401).json({ error: 'Unauthorized' });
+
+    const stripe = getStripe();
+    const { createClient } = await import('@supabase/supabase-js');
+    const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
+
+    const { data: { user } } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
+    if (!user) return res.status(401).json({ error: 'Unauthorized' });
+
+    const { data: profile } = await sb
+      .from('profiles')
+      .select('stripe_customer_id')
+      .eq('id', user.id)
+      .single();
+
+    if (!profile?.stripe_customer_id) {
+      return res.status(400).json({ error: 'Stripe obuna topilmadi' });
+    }
+
+    const appUrl = process.env.APP_URL ?? 'http://localhost:3000';
+    const portalSession = await stripe.billingPortal.sessions.create({
+      customer:   profile.stripe_customer_id as string,
+      return_url: `${appUrl}/dashboard`,
+    });
+
+    res.json({ url: portalSession.url });
+  } catch (err) {
+    console.error('[STRIPE/PORTAL]', err);
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// 3. Webhook — Stripe eventlarini qabul qilish
+app.post('/api/payments/webhook', async (req, res) => {
+  const sig     = req.headers['stripe-signature'] as string;
+  const secret  = process.env.STRIPE_WEBHOOK_SECRET;
+
+  if (!secret) {
+    console.error('[WEBHOOK] STRIPE_WEBHOOK_SECRET not set');
+    return res.status(500).json({ error: 'Webhook secret not configured' });
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let event: any;
+  try {
+    const stripe = getStripe();
+    event = stripe.webhooks.constructEvent(req.body, sig, secret);
+  } catch (err) {
+    console.error('[WEBHOOK] Signature verification failed:', (err as Error).message);
+    return res.status(400).json({ error: 'Invalid signature' });
+  }
+
+  const { createClient } = await import('@supabase/supabase-js');
+  const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
+
+  // Idempotency — bir event ikki marta ishlanmasin
+  const { error: dupErr } = await sb
+    .from('stripe_events')
+    .insert({ id: event.id })
+    .select();
+  if (dupErr) {
+    console.log('[WEBHOOK] Duplicate event, skipping:', event.id);
+    return res.json({ received: true });
+  }
+
+  console.log('[WEBHOOK] Event:', event.type);
+
+  try {
+    switch (event.type) {
+
+      // Checkout muvaffaqiyatli — plan yoqish
+      case 'checkout.session.completed': {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const session = event.data.object as any;
+        const userId  = session.metadata?.supabase_user_id;
+        const plan    = session.metadata?.plan as 'pro' | 'business';
+        const subId   = session.subscription as string;
+        const custId  = session.customer as string;
+        if (userId && plan && subId) {
+          await upgradePlan(userId, plan, custId, subId);
+          console.log(`[WEBHOOK] Plan upgraded: ${userId} → ${plan}`);
+        }
+        break;
+      }
+
+      // Oylik to'lov — credit yangilash
+      case 'invoice.paid': {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const invoice = event.data.object as any;
+        const subId   = typeof invoice.subscription === 'string'
+          ? invoice.subscription
+          : invoice.subscription?.id;
+        if (!subId) break;
+
+        const { data: profile } = await sb
+          .from('profiles')
+          .select('id, plan_id')
+          .eq('stripe_subscription_id', subId)
+          .single();
+
+        // Birinchi invoice — already handled by checkout.session.completed
+        if (profile && invoice.billing_reason === 'subscription_cycle') {
+          await renewCredits(profile.id, profile.plan_id);
+          console.log(`[WEBHOOK] Credits renewed: ${profile.id}`);
+        }
+        break;
+      }
+
+      // Obuna bekor qilindi / to'lov muvaffaqiyatsiz
+      case 'customer.subscription.deleted':
+      case 'invoice.payment_failed': {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const obj = event.data.object as any;
+        const subId = obj.id ?? obj.subscription;
+        if (!subId) break;
+
+        const { data: profile } = await sb
+          .from('profiles')
+          .select('id')
+          .eq('stripe_subscription_id', subId)
+          .single();
+
+        if (profile) {
+          await downgradePlan(profile.id);
+          console.log(`[WEBHOOK] Plan downgraded: ${profile.id}`);
+        }
+        break;
+      }
+    }
+  } catch (err) {
+    console.error('[WEBHOOK] Handler error:', err);
+  }
+
+  res.json({ received: true });
 });
 
 // ── Credits API ───────────────────────────────────────────────────

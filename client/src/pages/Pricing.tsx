@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useCredits } from '../hooks/useCredits';
+import { supabase } from '../lib/supabase';
+import { apiUrl } from '../lib/api';
 
 const PLANS = [
   {
@@ -88,8 +90,35 @@ const FAQ = [
 ];
 
 export default function Pricing() {
-  const [yearly, setYearly] = useState(false);
+  const [yearly, setYearly]     = useState(false);
+  const [paying, setPaying]     = useState<string | null>(null);
+  const [payError, setPayError] = useState('');
   const { profile } = useCredits();
+
+  const handleCheckout = async (planId: 'pro' | 'business') => {
+    setPayError('');
+    setPaying(planId);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) { window.location.href = '/signup'; return; }
+
+      const res = await fetch(apiUrl('/api/payments/checkout'), {
+        method: 'POST',
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ plan: planId, billing: yearly ? 'yearly' : 'monthly' }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Xatolik');
+      if (data.url) window.location.href = data.url;
+    } catch (err) {
+      setPayError(err instanceof Error ? err.message : 'Xatolik');
+    } finally {
+      setPaying(null);
+    }
+  };
 
   return (
     <div className="min-h-screen bg-[#080810] text-white">
@@ -144,6 +173,35 @@ export default function Pricing() {
             </span>
           </div>
         </div>
+
+        {/* Payment error */}
+        {payError && (
+          <div className="mb-6 bg-red-500/10 border border-red-500/20 rounded-xl px-5 py-3 flex items-center gap-3 max-w-lg mx-auto">
+            <span className="text-red-400">⚠</span>
+            <p className="text-red-400 text-sm">{payError}</p>
+            <button onClick={() => setPayError('')} className="ml-auto text-red-400/50 hover:text-red-400">✕</button>
+          </div>
+        )}
+
+        {/* Pro/Business foydalanuvchi uchun portal tugmasi */}
+        {profile && profile.plan_id !== 'free' && (
+          <div className="mb-8 text-center">
+            <button
+              onClick={async () => {
+                const { data: { session } } = await supabase.auth.getSession();
+                if (!session) return;
+                const res = await fetch(apiUrl('/api/payments/portal'), {
+                  method: 'POST',
+                  headers: { Authorization: `Bearer ${session.access_token}` },
+                });
+                const d = await res.json();
+                if (d.url) window.location.href = d.url;
+              }}
+              className="px-5 py-2.5 rounded-xl border border-white/15 text-sm text-white/60 hover:text-white hover:border-white/30 transition-all">
+              ⚙️ Obunani boshqarish / bekor qilish
+            </button>
+          </div>
+        )}
 
         {/* Plans grid */}
         <div className="grid md:grid-cols-3 gap-6 mb-16">
@@ -203,10 +261,24 @@ export default function Pricing() {
                   ))}
                 </ul>
 
-                <Link to={plan.btnLink}
-                  className={`w-full py-3 rounded-xl text-sm font-semibold text-center transition-all ${plan.btnClass}`}>
-                  {isCurrent ? '✓ Hozirgi plan' : plan.btnText}
-                </Link>
+                {plan.id === 'free' || isCurrent ? (
+                  <Link to={isCurrent ? '/dashboard' : plan.btnLink}
+                    className={`w-full py-3 rounded-xl text-sm font-semibold text-center transition-all block ${plan.btnClass}`}>
+                    {isCurrent ? '✓ Hozirgi plan' : plan.btnText}
+                  </Link>
+                ) : (
+                  <button
+                    onClick={() => handleCheckout(plan.id as 'pro' | 'business')}
+                    disabled={paying === plan.id}
+                    className={`w-full py-3 rounded-xl text-sm font-semibold text-center transition-all ${plan.btnClass} disabled:opacity-60`}>
+                    {paying === plan.id
+                      ? <span className="flex items-center justify-center gap-2">
+                          <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                          Yo'naltirilmoqda...
+                        </span>
+                      : plan.btnText}
+                  </button>
+                )}
               </div>
             );
           })}
