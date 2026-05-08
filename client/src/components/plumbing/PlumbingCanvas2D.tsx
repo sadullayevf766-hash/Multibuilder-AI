@@ -728,31 +728,47 @@ function projectPt(
 // ASOSIY COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// 8 ta resize handle uchun direction
+type HandleDir = 'n'|'s'|'e'|'w'|'nw'|'ne'|'sw'|'se';
+const HANDLE_DIRS: HandleDir[] = ['n','s','e','w','nw','ne','sw','se'];
+const HANDLE_R = 5; // px
+
 interface Props {
   project: PlumbingProject;
   view: ViewType;
   activeFloor: number;
   selectedId: string | null;
+  selectedPipeId: string | null;
   onSelectFixture: (id: string | null) => void;
-  // commit = faqat mouseUp da chaqiriladi (server save uchun)
+  onSelectPipe: (id: string | null) => void;
   onMoveFixture?: (id: string, pos: { x: number; y: number; z: number }) => void;
+  onResizeFixture?: (id: string, dims: { w?: number; d?: number }) => void;
+  onRemoveFixture?: (id: string) => void;
+  onDropFixture?: (type: string, pos: { x: number; y: number; z: number }) => void;
+  draggingLibType?: string | null;  // kutubxonadan drag qilinayotgan tip
   layers: Record<string, boolean>;
 }
 
 export default function PlumbingCanvas2D({
-  project, view, activeFloor, selectedId, onSelectFixture, onMoveFixture, layers,
+  project, view, activeFloor,
+  selectedId, selectedPipeId,
+  onSelectFixture, onSelectPipe,
+  onMoveFixture, onResizeFixture, onRemoveFixture, onDropFixture,
+  draggingLibType, layers,
 }: Props) {
-  const canvasRef   = useRef<HTMLCanvasElement>(null);
+  const canvasRef    = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const [offset, setOffset] = useState({ x: 60, y: 70 });
   const [scale,  setScale]  = useState(1.0);
-  const isPanning      = useRef(false);
-  const lastMouse      = useRef({ x: 0, y: 0 });
-  const draggingFix    = useRef<string | null>(null);
-
-  // Local drag position — real-time, server ga faqat mouseUp da yuboriladi
-  const [dragPos, setDragPos] = useState<{ id: string; x: number; y: number } | null>(null);
+  const isPanning       = useRef(false);
+  const lastMouse       = useRef({ x: 0, y: 0 });
+  const draggingFix     = useRef<string | null>(null);
+  const resizingFix     = useRef<{ id: string; dir: HandleDir; origDims: { w: number; d: number }; origPos: { x: number; y: number }; startWx: number; startWy: number } | null>(null);
+  const [dragPos,    setDragPos]    = useState<{ id: string; x: number; y: number } | null>(null);
+  const [resizeDims, setResizeDims] = useState<{ id: string; w: number; d: number } | null>(null);
+  // Library drag: sichqoncha canvas ustida turgan joyda "ghost" ko'rinadi
+  const [libGhostPos, setLibGhostPos] = useState<{ x: number; y: number } | null>(null);
 
   const getSize = () => {
     const c = containerRef.current;
@@ -867,7 +883,64 @@ export default function PlumbingCanvas2D({
           : fix.position;
         const p = projectPt(pos, view, project.buildingWidth, project.buildingLength, project.floorHeight, project.floorCount);
         drawFixtureSymbol(ctx, fix, p.x, p.y, fix.id === selectedId, scale);
+
+        // Resize handles — faqat top view da, tanlangan fixture uchun
+        if (fix.id === selectedId && (view === 'top' || view === 'bottom') && scale > 0.4) {
+          const rd = resizeDims && resizeDims.id === fix.id ? resizeDims : null;
+          const fw = m2px(rd ? rd.w : fix.dimensions.w);
+          const fd = m2px(rd ? rd.d : fix.dimensions.d);
+          const hx = p.x, hy = p.y;
+          ctx.save();
+          ctx.strokeStyle = '#ea580c'; ctx.fillStyle = '#fff';
+          ctx.lineWidth = 1.5;
+          // Dashed bounding box
+          ctx.setLineDash([4, 3]);
+          ctx.strokeRect(hx - fw/2 - 3, hy - fd/2 - 3, fw + 6, fd + 6);
+          ctx.setLineDash([]);
+          // 8 ta tutqich
+          const handles: Record<HandleDir, [number, number]> = {
+            nw: [hx - fw/2 - 3, hy - fd/2 - 3],
+            n:  [hx,             hy - fd/2 - 3],
+            ne: [hx + fw/2 + 3,  hy - fd/2 - 3],
+            w:  [hx - fw/2 - 3,  hy           ],
+            e:  [hx + fw/2 + 3,  hy           ],
+            sw: [hx - fw/2 - 3,  hy + fd/2 + 3],
+            s:  [hx,              hy + fd/2 + 3],
+            se: [hx + fw/2 + 3,  hy + fd/2 + 3],
+          };
+          for (const [, [hpx, hpy]] of Object.entries(handles)) {
+            ctx.beginPath();
+            ctx.arc(hpx, hpy, HANDLE_R, 0, Math.PI * 2);
+            ctx.fill(); ctx.stroke();
+          }
+          ctx.restore();
+        }
       }
+    }
+
+    // Pipe selection highlight
+    if (selectedPipeId) {
+      const pipe = project.pipes.find(p => p.id === selectedPipeId);
+      if (pipe) {
+        const p1 = projectPt(pipe.from, view, project.buildingWidth, project.buildingLength, project.floorHeight, project.floorCount);
+        const p2 = projectPt(pipe.to,   view, project.buildingWidth, project.buildingLength, project.floorHeight, project.floorCount);
+        ctx.save();
+        ctx.strokeStyle = '#f97316'; ctx.lineWidth = 4; ctx.setLineDash([6,3]);
+        ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+        ctx.setLineDash([]); ctx.restore();
+      }
+    }
+
+    // Library ghost — drag qilinayotgan element preview
+    if (libGhostPos && draggingLibType) {
+      ctx.save();
+      ctx.globalAlpha = 0.45;
+      ctx.strokeStyle = '#3b82f6'; ctx.fillStyle = '#dbeafe'; ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      const gw = m2px(0.5), gh = m2px(0.5);
+      ctx.fillRect(libGhostPos.x - gw/2, libGhostPos.y - gh/2, gw, gh);
+      ctx.strokeRect(libGhostPos.x - gw/2, libGhostPos.y - gh/2, gw, gh);
+      ctx.setLineDash([]); ctx.globalAlpha = 1; ctx.restore();
     }
 
     // Elevation chiziqlari (front/back/left/right uchun)
@@ -893,7 +966,7 @@ export default function PlumbingCanvas2D({
     // 8. Shtamp
     drawStamp(ctx, W, H, project, activeFloor);
 
-  }, [project, view, activeFloor, selectedId, offset, scale, layers, dragPos]);
+  }, [project, view, activeFloor, selectedId, selectedPipeId, offset, scale, layers, dragPos, resizeDims, libGhostPos, draggingLibType]);
 
   useEffect(() => { draw(); }, [draw]);
 
@@ -945,38 +1018,142 @@ export default function PlumbingCanvas2D({
     return pipes.filter(p => p.isRiser || p.floor === floor);
   }
 
-  // ── Interaction ─────────────────────────────────────────────────────────────
+  // ── Interaction helpers ─────────────────────────────────────────────────────
+  const DRAW_Y = 65;
+
   function worldPt(sx: number, sy: number) {
-    const drawY = 65;
-    return { x: (sx - offset.x) / scale, y: (sy - offset.y - drawY) / scale };
+    return { x: (sx - offset.x) / scale, y: (sy - offset.y - DRAW_Y) / scale };
+  }
+
+  // World koordinatadan metr koordinataga (SCALE bo'lib)
+  function w2m(v: number) { return v / SCALE; }
+
+  function fixturePx(fix: typeof project.fixtures[0]) {
+    const pos = dragPos?.id === fix.id ? { ...fix.position, x: dragPos.x, y: dragPos.y } : fix.position;
+    return projectPt(pos, view, project.buildingWidth, project.buildingLength, project.floorHeight, project.floorCount);
+  }
+
+  // Resize handle pozitsiyalarini qaytaradi (canvas SCALE space da)
+  function getHandles(fix: typeof project.fixtures[0]): Record<HandleDir, [number, number]> {
+    const p = fixturePx(fix);
+    const rd = resizeDims?.id === fix.id ? resizeDims : null;
+    const fw = m2px(rd ? rd.w : fix.dimensions.w);
+    const fd = m2px(rd ? rd.d : fix.dimensions.d);
+    const hx = p.x, hy = p.y;
+    const ex = fw/2 + 3, ey = fd/2 + 3;
+    return {
+      nw: [hx - ex, hy - ey], n:  [hx,      hy - ey], ne: [hx + ex, hy - ey],
+      w:  [hx - ex, hy      ],                          e:  [hx + ex, hy      ],
+      sw: [hx - ex, hy + ey], s:  [hx,      hy + ey], se: [hx + ex, hy + ey],
+    };
+  }
+
+  // Handle hit test — returns {fixId, dir} or null
+  function hitHandle(wx: number, wy: number): { fixId: string; dir: HandleDir } | null {
+    if (!selectedId || !(view === 'top' || view === 'bottom') || scale < 0.4) return null;
+    const fix = project.fixtures.find(f => f.id === selectedId);
+    if (!fix) return null;
+    const handles = getHandles(fix);
+    for (const dir of HANDLE_DIRS) {
+      const [hx, hy] = handles[dir];
+      const r = (HANDLE_R + 4) / scale; // screen pixels → world
+      if (Math.abs(wx - hx) <= r && Math.abs(wy - hy) <= r) {
+        return { fixId: fix.id, dir: dir as HandleDir };
+      }
+    }
+    return null;
   }
 
   function hitFixture(wx: number, wy: number): string | null {
-    const fixes = view === 'top' || view === 'bottom'
+    const fixes = (view === 'top' || view === 'bottom')
       ? project.fixtures.filter(f => f.floor === activeFloor)
       : project.fixtures;
     for (const fix of [...fixes].reverse()) {
-      const p = projectPt(fix.position, view, project.buildingWidth, project.buildingLength, project.floorHeight, project.floorCount);
-      // Hitbox: fixture bounding box yarmi (rotation hisobga olinmagan, ammo yetarli)
-      const hw = Math.max(12, m2px(fix.dimensions.w) / 2) + 4;
-      const hd = Math.max(12, m2px(fix.dimensions.d) / 2) + 4;
+      const p = fixturePx(fix);
+      const hw = Math.max(12, m2px(fix.dimensions.w) / 2) + 5;
+      const hd = Math.max(12, m2px(fix.dimensions.d) / 2) + 5;
       if (Math.abs(wx - p.x) <= hw && Math.abs(wy - p.y) <= hd) return fix.id;
     }
     return null;
   }
 
+  function hitPipe(wx: number, wy: number): string | null {
+    const pipes = filterPipesByView(project.pipes, view, activeFloor);
+    for (const pipe of [...pipes].reverse()) {
+      const p1 = projectPt(pipe.from, view, project.buildingWidth, project.buildingLength, project.floorHeight, project.floorCount);
+      const p2 = projectPt(pipe.to,   view, project.buildingWidth, project.buildingLength, project.floorHeight, project.floorCount);
+      // Nuqtaning chiziqqacha masofasi
+      const dx = p2.x - p1.x, dy = p2.y - p1.y;
+      const len2 = dx*dx + dy*dy;
+      if (len2 < 1) continue;
+      const t = Math.max(0, Math.min(1, ((wx-p1.x)*dx + (wy-p1.y)*dy) / len2));
+      const nearX = p1.x + t*dx, nearY = p1.y + t*dy;
+      const dist = Math.sqrt((wx-nearX)**2 + (wy-nearY)**2);
+      if (dist < Math.max(8, 5/scale)) return pipe.id;
+    }
+    return null;
+  }
+
+  // Resize cursor style uchun
+  const RESIZE_CURSORS: Record<HandleDir, string> = {
+    n:'ns-resize', s:'ns-resize', e:'ew-resize', w:'ew-resize',
+    nw:'nwse-resize', se:'nwse-resize', ne:'nesw-resize', sw:'nesw-resize',
+  };
+  const [cursorStyle, setCursorStyle] = useState('default');
+
   function onMouseDown(e: React.MouseEvent<HTMLCanvasElement>) {
+    if (e.button === 1) return; // middle — pan
     const rect = (e.target as HTMLCanvasElement).getBoundingClientRect();
     const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
     const { x: wx, y: wy } = worldPt(sx, sy);
-    const hit = hitFixture(wx, wy);
-    if (hit) {
-      onSelectFixture(hit);
-      if (onMoveFixture) draggingFix.current = hit;
-    } else {
-      onSelectFixture(null);
-      isPanning.current = true;
+
+    // 1. Library drag drop
+    if (draggingLibType && view === 'top') {
+      const mx = w2m(wx), my = w2m(wy);
+      const floor = activeFloor;
+      onDropFixture?.(draggingLibType, { x: mx, y: my, z: (floor-1)*project.floorHeight });
+      setLibGhostPos(null);
+      lastMouse.current = { x: sx, y: sy };
+      return;
     }
+
+    // 2. Resize handle
+    const handle = hitHandle(wx, wy);
+    if (handle) {
+      const fix = project.fixtures.find(f => f.id === handle.fixId)!;
+      resizingFix.current = {
+        id: handle.fixId, dir: handle.dir,
+        origDims: { w: fix.dimensions.w, d: fix.dimensions.d },
+        origPos: { x: fix.position.x, y: fix.position.y },
+        startWx: wx, startWy: wy,
+      };
+      lastMouse.current = { x: sx, y: sy };
+      return;
+    }
+
+    // 3. Fixture hit
+    const hitFix = hitFixture(wx, wy);
+    if (hitFix) {
+      onSelectFixture(hitFix);
+      onSelectPipe(null);
+      draggingFix.current = hitFix;
+      lastMouse.current = { x: sx, y: sy };
+      return;
+    }
+
+    // 4. Pipe hit
+    const hitP = hitPipe(wx, wy);
+    if (hitP) {
+      onSelectPipe(hitP);
+      onSelectFixture(null);
+      lastMouse.current = { x: sx, y: sy };
+      return;
+    }
+
+    // 5. Pan
+    onSelectFixture(null);
+    onSelectPipe(null);
+    isPanning.current = true;
     lastMouse.current = { x: sx, y: sy };
   }
 
@@ -984,47 +1161,123 @@ export default function PlumbingCanvas2D({
     const rect = (e.target as HTMLCanvasElement).getBoundingClientRect();
     const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
     const dx = sx - lastMouse.current.x, dy = sy - lastMouse.current.y;
+    const { x: wx, y: wy } = worldPt(sx, sy);
 
+    // Library ghost
+    if (draggingLibType && view === 'top') {
+      setLibGhostPos({ x: wx, y: wy });
+      setCursorStyle('copy');
+      lastMouse.current = { x: sx, y: sy };
+      return;
+    }
+
+    // Resize drag
+    if (resizingFix.current) {
+      const { id, dir, origDims, origPos, startWx, startWy } = resizingFix.current;
+      const deltaX = w2m(wx - startWx); // metrda
+      const deltaY = w2m(wy - startWy);
+      let newW = origDims.w, newD = origDims.d;
+
+      if (dir.includes('e')) newW = Math.max(0.1, origDims.w + deltaX);
+      if (dir.includes('w')) newW = Math.max(0.1, origDims.w - deltaX);
+      if (dir.includes('s')) newD = Math.max(0.1, origDims.d + deltaY);
+      if (dir.includes('n')) newD = Math.max(0.1, origDims.d - deltaY);
+
+      // 5sm snap
+      const snap5 = (v: number) => Math.round(v / 0.05) * 0.05;
+      newW = snap5(newW); newD = snap5(newD);
+
+      setResizeDims({ id, w: newW, d: newD });
+      lastMouse.current = { x: sx, y: sy };
+      return;
+    }
+
+    // Move drag
+    if (draggingFix.current && view === 'top') {
+      const snap = (v: number) => Math.round(v / 0.05) * 0.05;
+      setDragPos({ id: draggingFix.current, x: snap(w2m(wx)), y: snap(w2m(wy)) });
+      setCursorStyle('grabbing');
+      lastMouse.current = { x: sx, y: sy };
+      return;
+    }
+
+    // Pan
     if (isPanning.current) {
       setOffset(o => ({ x: o.x + dx, y: o.y + dy }));
-    } else if (draggingFix.current && view === 'top') {
-      const { x: wx, y: wy } = worldPt(sx, sy);
-      const snap = (v: number) => Math.round(v / 0.05) * 0.05;
-      const newX = snap(wx / SCALE);
-      const newY = snap(wy / SCALE);
-      // Faqat local state yangilanadi — TEZKOR, server yo'q
-      setDragPos({ id: draggingFix.current, x: newX, y: newY });
+      setCursorStyle('grab');
+    } else {
+      // Hover cursor
+      const handle = hitHandle(wx, wy);
+      if (handle) {
+        setCursorStyle(RESIZE_CURSORS[handle.dir]);
+      } else if (hitFixture(wx, wy)) {
+        setCursorStyle('grab');
+      } else if (draggingLibType) {
+        setCursorStyle('copy');
+      } else {
+        setCursorStyle('default');
+      }
     }
+
     lastMouse.current = { x: sx, y: sy };
   }
 
-  function onMouseUp() {
-    isPanning.current = false;
-    // MouseUp da server ga commit qilish
+  function onMouseUp(e: React.MouseEvent<HTMLCanvasElement>) {
+    // Resize commit
+    if (resizingFix.current && resizeDims) {
+      onResizeFixture?.(resizeDims.id, { w: resizeDims.w, d: resizeDims.d });
+      resizingFix.current = null;
+      setResizeDims(null);
+    }
+
+    // Move commit
     if (draggingFix.current && dragPos && onMoveFixture) {
       const fix = project.fixtures.find(f => f.id === draggingFix.current);
-      if (fix) {
-        onMoveFixture(draggingFix.current, { ...fix.position, x: dragPos.x, y: dragPos.y });
-      }
+      if (fix) onMoveFixture(draggingFix.current, { ...fix.position, x: dragPos.x, y: dragPos.y });
     }
+
+    isPanning.current = false;
     draggingFix.current = null;
     setDragPos(null);
+    setCursorStyle('default');
   }
+
+  function onMouseLeave() {
+    isPanning.current = false;
+    draggingFix.current = null;
+    resizingFix.current = null;
+    setDragPos(null);
+    setResizeDims(null);
+    setLibGhostPos(null);
+    setCursorStyle('default');
+  }
+
+  // Backspace / Delete → fixture o'chirish
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        const active = document.activeElement;
+        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
+        if (selectedId) { onRemoveFixture?.(selectedId); onSelectFixture(null); }
+      }
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [selectedId, onRemoveFixture, onSelectFixture]);
+
+  // Library drag: mouse canvas dan ketganda ghost yo'qolsin
+  useEffect(() => {
+    if (!draggingLibType) setLibGhostPos(null);
+  }, [draggingLibType]);
 
   function onWheel(e: React.WheelEvent) {
     e.preventDefault();
     const rect = (e.target as HTMLCanvasElement).getBoundingClientRect();
-    // Cursor canvas ichidagi pozitsiyasi
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
-
     const factor = e.deltaY < 0 ? 1.12 : 0.9;
-
     setScale(prevScale => {
       const newScale = Math.max(0.15, Math.min(6, prevScale * factor));
-      // Cursor atrofida zoom: cursor world koordinatasi o'zgarmasin
-      // worldX = (mouseX - offsetX) / prevScale
-      // newOffsetX = mouseX - worldX * newScale
       setOffset(prevOffset => ({
         x: mouseX - (mouseX - prevOffset.x) * (newScale / prevScale),
         y: mouseY - (mouseY - prevOffset.y) * (newScale / prevScale),
@@ -1095,11 +1348,11 @@ export default function PlumbingCanvas2D({
       <canvas
         ref={canvasRef}
         className="w-full h-full"
-        style={{ cursor: dragPos ? 'grabbing' : isPanning.current ? 'grab' : draggingFix.current ? 'grabbing' : 'default' }}
+        style={{ cursor: cursorStyle }}
         onMouseDown={onMouseDown}
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
-        onMouseLeave={() => { onMouseUp(); setDragPos(null); draggingFix.current = null; }}
+        onMouseLeave={onMouseLeave}
         onWheel={onWheel}
       />
 

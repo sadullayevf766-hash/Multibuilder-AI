@@ -52,7 +52,11 @@ const LIBRARY_GROUPS: Array<{ title: string; items: FixtureType[] }> = [
   { title: 'Yuvish xona', items: ['washing_machine', 'floor_drain'] },
 ];
 
-function ElementLibrary({ onDragStart }: { onDragStart: (type: FixtureType) => void }) {
+function ElementLibrary({
+  onStartDrag,
+}: {
+  onStartDrag: (type: FixtureType) => void;
+}) {
   return (
     <div className="w-56 flex-shrink-0 border-r border-white/5 bg-[#0a0a16] flex flex-col">
       <div className="px-3 py-3 border-b border-white/5">
@@ -68,14 +72,12 @@ function ElementLibrary({ onDragStart }: { onDragStart: (type: FixtureType) => v
                 return (
                   <button
                     key={type}
-                    draggable
-                    onDragStart={() => onDragStart(type)}
-                    onClick={() => onDragStart(type)}
-                    className="flex flex-col items-center gap-1 p-2 rounded-lg bg-white/3 border border-white/5 hover:border-blue-500/40 hover:bg-blue-500/10 transition-all cursor-grab active:cursor-grabbing group"
+                    onMouseDown={e => { e.preventDefault(); onStartDrag(type); }}
+                    className="flex flex-col items-center gap-1 p-2 rounded-lg bg-white/3 border border-white/5 hover:border-blue-500/40 hover:bg-blue-500/10 transition-all cursor-grab active:cursor-grabbing group select-none"
                   >
-                    <span className="w-8 h-8 flex items-center justify-center text-white/60 group-hover:text-blue-400"
+                    <span className="w-8 h-8 flex items-center justify-center text-white/60 group-hover:text-blue-400 pointer-events-none"
                       dangerouslySetInnerHTML={{ __html: meta.icon }} />
-                    <span className="text-[10px] text-white/50 group-hover:text-blue-400 text-center leading-tight">{meta.uz}</span>
+                    <span className="text-[10px] text-white/50 group-hover:text-blue-400 text-center leading-tight pointer-events-none">{meta.uz}</span>
                   </button>
                 );
               })}
@@ -151,18 +153,76 @@ function DimInput({
   );
 }
 
+const PIPE_TYPE_LABELS: Record<string, { name: string; color: string }> = {
+  cold:  { name: 'В1 Sovuq suv',        color: '#1d6db5' },
+  hot:   { name: 'Т3 Issiq suv',         color: '#c0392b' },
+  circ:  { name: 'Т4 Sirkul',            color: '#d97706' },
+  drain: { name: 'К1 Kanalizatsiya',     color: '#92400e' },
+};
+
 function PropertiesPanel({
   project,
   selectedId,
+  selectedPipeId,
   onRemove,
   onResize,
 }: {
   project: PlumbingProject;
   selectedId: string | null;
+  selectedPipeId: string | null;
   onRemove: (id: string) => void;
   onResize: (id: string, dims: { w?: number; d?: number; h?: number }) => void;
 }) {
-  const fix = project.fixtures.find(f => f.id === selectedId);
+  const fix  = project.fixtures.find(f => f.id === selectedId);
+  const pipe = project.pipes.find(p => p.id === selectedPipeId);
+
+  // Pipe tanlangan holat
+  if (!fix && pipe) {
+    const ptype = PIPE_TYPE_LABELS[pipe.type] ?? { name: pipe.type, color: '#888' };
+    const len = Math.sqrt(
+      (pipe.to.x - pipe.from.x) ** 2 +
+      (pipe.to.y - pipe.from.y) ** 2 +
+      (pipe.to.z - pipe.from.z) ** 2
+    );
+    return (
+      <div className="w-56 flex-shrink-0 border-l border-white/5 bg-[#0a0a16] flex flex-col">
+        <div className="px-3 py-3 border-b border-white/5">
+          <div className="text-xs font-semibold text-white/40 uppercase tracking-wider">Truba</div>
+        </div>
+        <div className="flex-1 p-3 space-y-3">
+          <div className="flex items-center gap-2">
+            <div className="w-3 h-3 rounded-full" style={{ background: ptype.color }} />
+            <span className="text-sm font-medium">{ptype.name}</span>
+          </div>
+          {pipe.label && <div className="text-xs text-white/40">{pipe.label}</div>}
+          <div className="space-y-1.5">
+            {[
+              { label: 'Diametr',   val: `ø${pipe.diamMm} mm` },
+              { label: 'Uzunlik',   val: `${len.toFixed(2)} m` },
+              { label: 'Material',  val: pipe.material.toUpperCase() },
+              { label: 'Qavat',     val: `${pipe.floor}-qavat` },
+              { label: 'Stoyak',    val: pipe.isRiser ? 'Ha' : 'Yo\'q' },
+            ].map(s => (
+              <div key={s.label} className="flex justify-between text-xs">
+                <span className="text-white/40">{s.label}</span>
+                <span className="text-white/70 font-mono">{s.val}</span>
+              </div>
+            ))}
+            {pipe.slope !== undefined && (
+              <div className="flex justify-between text-xs">
+                <span className="text-white/40">Qiyalik</span>
+                <span className="text-white/70 font-mono">{pipe.slope}‰</span>
+              </div>
+            )}
+          </div>
+          <div className="pt-1 text-[9px] text-white/20">
+            ({pipe.from.x.toFixed(2)},{pipe.from.y.toFixed(2)},{pipe.from.z.toFixed(2)}) →<br/>
+            ({pipe.to.x.toFixed(2)},{pipe.to.y.toFixed(2)},{pipe.to.z.toFixed(2)})
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!fix) {
     return (
@@ -405,6 +465,8 @@ export default function PlumbingEditor() {
   const [activeView, setActiveView]   = useState<ViewType>('top');
   const [activeFloor, setActiveFloor] = useState(1);
   const [selectedId, setSelectedId]   = useState<string | null>(null);
+  const [selectedPipeId, setSelectedPipeId] = useState<string | null>(null);
+  const [draggingLibType, setDraggingLibType] = useState<string | null>(null);
   const [showAIEdit, setShowAIEdit]   = useState(false);
   const [showLayers, setShowLayers]   = useState(false);
   const [showLibrary, setShowLibrary] = useState(true);
@@ -511,7 +573,34 @@ export default function PlumbingEditor() {
     }
   }, [id]);
 
-  // Library element click → add to first room
+  // Library element drop → canvas ga qo'yish (pozitsiya bilan)
+  const handleDropFixture = useCallback(async (type: string, pos: { x: number; y: number; z: number }) => {
+    if (!id) return;
+    const cur = projectRef.current;
+    if (!cur) return;
+    // Eng yaqin xonani topish
+    const room = cur.rooms
+      .filter(r => r.floor === activeFloor)
+      .sort((a, b) => {
+        const da = Math.hypot(a.position.x + a.width/2 - pos.x, a.position.y + a.length/2 - pos.y);
+        const db = Math.hypot(b.position.x + b.width/2 - pos.x, b.position.y + b.length/2 - pos.y);
+        return da - db;
+      })[0];
+    if (!room) return;
+    setDraggingLibType(null);
+    try {
+      const token = await getToken();
+      const res = await fetch(apiUrl(`/api/plumbing/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'add_fixture', payload: { roomId: room.id, type, position: pos } }),
+      });
+      const data = await res.json() as { project?: PlumbingProject };
+      if (data.project) setProject(data.project);
+    } catch {}
+  }, [id, activeFloor]);
+
+  // Library element click (eski) — birinchi xonaga qo'yish
   const handleLibraryAdd = useCallback(async (type: FixtureType) => {
     if (!id || !project) return;
     const room = project.rooms.find(r => r.floor === activeFloor);
@@ -657,19 +746,28 @@ export default function PlumbingEditor() {
 
         {/* Element Library */}
         {showLibrary && (
-          <ElementLibrary onDragStart={handleLibraryAdd} />
+          <ElementLibrary onStartDrag={setDraggingLibType} />
         )}
 
         {/* Canvas */}
-        <div className="flex-1 relative">
+        <div className="flex-1 relative"
+          onMouseUp={() => { if (draggingLibType) setDraggingLibType(null); }}
+          onMouseLeave={() => { if (draggingLibType) setDraggingLibType(null); }}
+        >
           {activeView !== '3d' ? (
             <PlumbingCanvas2D
               project={project}
               view={activeView}
               activeFloor={activeFloor}
               selectedId={selectedId}
-              onSelectFixture={setSelectedId}
+              selectedPipeId={selectedPipeId}
+              onSelectFixture={id => { setSelectedId(id); if (id) setSelectedPipeId(null); }}
+              onSelectPipe={id => { setSelectedPipeId(id); if (id) setSelectedId(null); }}
               onMoveFixture={handleMoveFixture}
+              onResizeFixture={handleResizeFixture}
+              onRemoveFixture={handleRemoveFixture}
+              onDropFixture={handleDropFixture}
+              draggingLibType={draggingLibType}
               layers={layerVis}
             />
           ) : (
@@ -708,6 +806,7 @@ export default function PlumbingEditor() {
           <PropertiesPanel
             project={project}
             selectedId={selectedId}
+            selectedPipeId={selectedPipeId}
             onRemove={handleRemoveFixture}
             onResize={handleResizeFixture}
           />
