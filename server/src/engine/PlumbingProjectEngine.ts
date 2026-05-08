@@ -393,15 +393,14 @@ function bboxOverlaps(a: BBox, b: BBox, gap = 0.04): boolean {
          a.y1 < b.y2 + gap && a.y2 > b.y1 - gap;
 }
 
-function bboxInsideRoom(bb: BBox, room: PlumbingRoom, margin = 0.04): boolean {
-  return bb.x1 >= room.position.x + margin &&
-         bb.x2 <= room.position.x + room.width  - margin &&
-         bb.y1 >= room.position.y + margin &&
-         bb.y2 <= room.position.y + room.length - margin;
+function bboxInsideRoom(bb: BBox, room: PlumbingRoom, margin = 0.02): boolean {
+  return bb.x1 >= room.position.x - margin &&
+         bb.x2 <= room.position.x + room.width  + margin &&
+         bb.y1 >= room.position.y - margin &&
+         bb.y2 <= room.position.y + room.length + margin;
 }
 
-// Bitta devorda fixture uchun joy topish
-// cursor — devor bo'ylab keyingi bo'sh joy boshi
+// Bitta devorda fixture uchun joy topish — scanning yondashuv
 function tryPlaceOnWall(
   room: PlumbingRoom,
   w: number, d: number,
@@ -410,46 +409,69 @@ function tryPlaceOnWall(
   placed: BBox[],
 ): { pos: { x: number; y: number }; wall: WallSide } | null {
   const { along, into } = getAlongInto(w, d, wall);
-  const WALL_T = 0.17; // devor qalinligi + clearance
-  const GAP   = 0.05; // fixture'lar orasidagi minimal bo'shliq
+  const WALL_T = 0.17; // devor qalinligi + bo'shliq
+  const GAP    = 0.05; // fixture'lar orasidagi minimal bo'shliq
+  const MARGIN = 0.04; // xona chegarasidan minimal masofa
 
-  // Devor bo'ylab o'lcham (room.width yoki room.length)
   const roomAlong = (wall === 'north' || wall === 'south') ? room.width : room.length;
-
-  // Devordan ichkariga masofa (markazgacha)
   const intoCenter = into / 2 + WALL_T;
 
-  // Devor bo'ylab markaz pozitsiyasi
-  const alongStart = cursors[wall] + along / 2;
-  const alongEnd   = alongStart + along / 2 + GAP;
-
-  if (alongEnd > roomAlong - 0.04) return null; // sig'maydi
-
-  // Global koordinatalar
-  let cx: number, cy: number;
   const rx = room.position.x, ry = room.position.y;
 
-  switch (wall) {
-    case 'north': cx = rx + alongStart; cy = ry + intoCenter;              break;
-    case 'south': cx = rx + alongStart; cy = ry + room.length - intoCenter; break;
-    case 'west':  cx = rx + intoCenter; cy = ry + alongStart;              break;
-    case 'east':  cx = rx + room.width - intoCenter; cy = ry + alongStart; break;
+  // Fixture markazining devor bo'ylab pozitsiyasi
+  // Cursor = keyingi bo'sh joy boshi (devor boshidan)
+  let alongCenter = cursors[wall] + along / 2;
+
+  // Xona ichiga sig'adimi?
+  if (alongCenter + along / 2 + MARGIN > roomAlong) return null;
+
+  // Global markaz
+  let cx!: number, cy!: number;
+  const computeCenter = (ac: number) => {
+    switch (wall) {
+      case 'north': return { x: rx + ac, y: ry + intoCenter };
+      case 'south': return { x: rx + ac, y: ry + room.length - intoCenter };
+      case 'west':  return { x: rx + intoCenter, y: ry + ac };
+      case 'east':  return { x: rx + room.width - intoCenter, y: ry + ac };
+    }
+  };
+
+  // Overlap bo'lmagan joy topguncha scan
+  const MAX_TRIES = 20;
+  for (let attempt = 0; attempt < MAX_TRIES; attempt++) {
+    if (alongCenter + along / 2 + MARGIN > roomAlong) return null;
+
+    const center = computeCenter(alongCenter);
+    cx = center.x; cy = center.y;
+    const bb = fixtureBBox(cx, cy, w, d, wall);
+
+    if (!bboxInsideRoom(bb, room, MARGIN)) return null;
+
+    let hasOverlap = false;
+    let maxConflictEnd = alongCenter; // eng kech tugaydigan conflict
+    for (const other of placed) {
+      if (bboxOverlaps(bb, other, 0.01)) {
+        hasOverlap = true;
+        // Conflict tugash nuqtasini topish (devor bo'ylab)
+        const conflictEnd = (wall === 'north' || wall === 'south')
+          ? (other.x2 - rx)   // along = x
+          : (other.y2 - ry);  // along = y
+        maxConflictEnd = Math.max(maxConflictEnd, conflictEnd + GAP);
+      }
+    }
+
+    if (!hasOverlap) {
+      // Joy topildi
+      cursors[wall] = alongCenter + along / 2 + GAP;
+      placed.push(bb);
+      return { pos: { x: cx, y: cy }, wall };
+    }
+
+    // Conflict dan keyin davom etish
+    alongCenter = maxConflictEnd + along / 2;
   }
 
-  const bb = fixtureBBox(cx, cy, w, d, wall);
-
-  // Xona ichida?
-  if (!bboxInsideRoom(bb, room)) return null;
-
-  // Boshqa fixture'lar bilan overlap?
-  for (const other of placed) {
-    if (bboxOverlaps(bb, other)) return null;
-  }
-
-  // Joy topildi — cursорни siljit
-  cursors[wall] += along + GAP;
-  placed.push(bb);
-  return { pos: { x: cx, y: cy }, wall };
+  return null; // joy topilmadi
 }
 
 function placeFixtures(rooms: PlumbingRoom[], spec: PlumbingProjectSpec, floorHeight: number): PlumbingFixture[] {

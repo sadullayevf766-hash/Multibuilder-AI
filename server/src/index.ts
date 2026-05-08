@@ -1108,6 +1108,17 @@ app.patch('/api/plumbing/:id', async (req, res) => {
       project = plumbingProjectEngine.removeFixture(project, payload.fixtureId);
     } else if (action === 'move_fixture') {
       project = plumbingProjectEngine.moveFixture(project, payload.fixtureId, payload.position);
+    } else if (action === 'resize_fixture') {
+      const { fixtureId, dimensions } = payload as { fixtureId: string; dimensions: { w: number; d: number; h: number } };
+      project = {
+        ...project,
+        fixtures: project.fixtures.map(f =>
+          f.id === fixtureId
+            ? { ...f, dimensions: { ...f.dimensions, ...dimensions }, isManual: true }
+            : f
+        ),
+        updatedAt: new Date().toISOString(),
+      };
     } else if (action === 'update_name') {
       project = { ...project, name: payload.name, updatedAt: new Date().toISOString() };
     } else if (action === 'update_layer') {

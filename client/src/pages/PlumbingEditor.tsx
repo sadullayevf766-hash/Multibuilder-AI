@@ -118,14 +118,49 @@ function ElementLibrary({ onDragStart }: { onDragStart: (type: FixtureType) => v
 // PROPERTIES PANEL
 // ═══════════════════════════════════════════════════════════════════════════════
 
+function DimInput({
+  label, value, onChange,
+}: { label: string; value: number; onChange: (v: number) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState('');
+
+  const start = () => { setText(value.toFixed(2)); setEditing(true); };
+  const commit = () => {
+    const v = parseFloat(text.replace(',', '.'));
+    if (!isNaN(v) && v > 0.05 && v < 5) onChange(v);
+    setEditing(false);
+  };
+
+  return (
+    <div className="bg-white/5 hover:bg-white/10 rounded px-2 py-1.5 text-center cursor-text transition-colors"
+      onClick={!editing ? start : undefined}>
+      <div className="text-[9px] text-white/30 uppercase mb-0.5">{label}</div>
+      {editing ? (
+        <input
+          autoFocus
+          value={text}
+          onChange={e => setText(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(false); }}
+          className="w-full text-xs font-mono text-center bg-transparent outline-none text-orange-300 border-b border-orange-400/50"
+        />
+      ) : (
+        <div className="text-xs font-mono text-white/70">{value.toFixed(2)}<span className="text-white/30 text-[9px]">m</span></div>
+      )}
+    </div>
+  );
+}
+
 function PropertiesPanel({
   project,
   selectedId,
   onRemove,
+  onResize,
 }: {
   project: PlumbingProject;
   selectedId: string | null;
   onRemove: (id: string) => void;
+  onResize: (id: string, dims: { w?: number; d?: number; h?: number }) => void;
 }) {
   const fix = project.fixtures.find(f => f.id === selectedId);
 
@@ -195,17 +230,24 @@ function PropertiesPanel({
           </div>
         </div>
 
-        {/* Dimensions */}
-        <div className="space-y-2">
-          <div className="text-xs text-white/30 uppercase tracking-wider">O'lchamlar</div>
-          <div className="grid grid-cols-3 gap-1.5">
-            {(['w','d','h'] as const).map(dim => (
-              <div key={dim} className="bg-white/5 rounded px-2 py-1.5 text-center">
-                <div className="text-[9px] text-white/30 uppercase">{dim}</div>
-                <div className="text-xs font-mono text-white/70">{fix.dimensions[dim].toFixed(2)}m</div>
-              </div>
-            ))}
+        {/* Dimensions — editable */}
+        <div className="space-y-1.5">
+          <div className="text-xs text-white/30 uppercase tracking-wider flex items-center gap-1">
+            O'lchamlar
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-white/20">
+              <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4z"/>
+            </svg>
           </div>
+          <div className="grid grid-cols-3 gap-1.5">
+            <DimInput label="Kenglik" value={fix.dimensions.w}
+              onChange={v => onResize(fix.id, { w: v })} />
+            <DimInput label="Chuqurlik" value={fix.dimensions.d}
+              onChange={v => onResize(fix.id, { d: v })} />
+            <DimInput label="Balandlik" value={fix.dimensions.h}
+              onChange={v => onResize(fix.id, { h: v })} />
+          </div>
+          <div className="text-[9px] text-white/20 px-0.5">Bosib o'zgartiring (0.05–5m)</div>
         </div>
 
         {/* Connections */}
@@ -397,6 +439,32 @@ export default function PlumbingEditor() {
       setLoading(false);
     }
   }
+
+  const handleResizeFixture = useCallback(async (fixtureId: string, dims: { w?: number; d?: number; h?: number }) => {
+    if (!id) return;
+    const cur = projectRef.current;
+    if (!cur) return;
+    const optimistic: PlumbingProject = {
+      ...cur,
+      fixtures: cur.fixtures.map(f =>
+        f.id === fixtureId ? { ...f, dimensions: { ...f.dimensions, ...dims }, isManual: true } : f
+      ),
+    };
+    setProject(optimistic);
+    try {
+      const token = await getToken();
+      const fix = cur.fixtures.find(f => f.id === fixtureId);
+      if (!fix) return;
+      const newDims = { ...fix.dimensions, ...dims };
+      const res = await fetch(apiUrl(`/api/plumbing/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'resize_fixture', payload: { fixtureId, dimensions: newDims } }),
+      });
+      const data = await res.json() as { project?: PlumbingProject };
+      if (data.project) setProject(data.project);
+    } catch {}
+  }, [id]);
 
   const handleRemoveFixture = useCallback(async (fixtureId: string) => {
     if (!id || !project) return;
@@ -641,6 +709,7 @@ export default function PlumbingEditor() {
             project={project}
             selectedId={selectedId}
             onRemove={handleRemoveFixture}
+            onResize={handleResizeFixture}
           />
         )}
       </div>
