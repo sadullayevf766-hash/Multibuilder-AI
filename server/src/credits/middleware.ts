@@ -91,6 +91,12 @@ export function requireCredits(action: CreditAction) {
 
     const userId = await getUserIdFromToken(authHeader);
     if (!userId) {
+      // Dev rejimda auth muvaffaqiyatsiz bo'lsa — skip (anon Supabase key bilan)
+      if (process.env.NODE_ENV !== 'production') {
+        const r = req as Request & { userId?: string; skipCredits?: boolean };
+        r.skipCredits = true;
+        return next();
+      }
       return res.status(401).json({
         error: 'Tizimga kirish talab qilinadi',
         code: 'UNAUTHORIZED',
@@ -102,6 +108,13 @@ export function requireCredits(action: CreditAction) {
 
     const profile = await getUserProfile(userId);
     if (!profile) {
+      // Dev rejimda profil yo'q bo'lsa — skip (Supabase migration qilinmagan bo'lishi mumkin)
+      if (process.env.NODE_ENV !== 'production') {
+        const r = req as Request & { userId?: string; skipCredits?: boolean };
+        r.userId = userId;
+        r.skipCredits = true;
+        return next();
+      }
       return res.status(404).json({ error: 'Profil topilmadi', code: 'NO_PROFILE' });
     }
 

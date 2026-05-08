@@ -986,6 +986,241 @@ app.post('/api/generate-facade', requireCredits('super_generate'), async (req, r
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// PLUMBING (SANTEXNIKA) MODULE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+import { PlumbingAIParser } from './ai/PlumbingAIParser';
+import { PlumbingProjectEngine } from './engine/PlumbingProjectEngine';
+import type { PlumbingProject, PlumbingProjectSpec } from './engine/PlumbingProjectEngine';
+
+const plumbingAIParser    = new PlumbingAIParser(process.env.GEMINI_API_KEY || '');
+const plumbingProjectEngine = new PlumbingProjectEngine();
+
+// In-memory store (Supabase ga o'tkazish mumkin keyinroq)
+const plumbingStore = new Map<string, PlumbingProject>();
+
+// POST /api/plumbing/generate — prompt → loyiha generatsiyasi
+app.post('/api/plumbing/generate', requireCredits('plumbing_generate'), async (req, res) => {
+  try {
+    const { description, name } = req.body;
+    if (!description) return res.status(400).json({ error: 'description required' });
+
+    console.log('[PLUMBING] generate:', description.slice(0, 80));
+
+    const spec = await plumbingAIParser.parse(description);
+    const project = plumbingProjectEngine.generate(spec);
+    project.description = description;
+    if (name) project.name = name;
+
+    // Auth header bilan user ID olish
+    const authHeader = req.headers.authorization;
+    let userId: string | null = null;
+    if (authHeader) {
+      try {
+        const { createClient } = await import('@supabase/supabase-js');
+        const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
+        const { data } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
+        userId = data.user?.id ?? null;
+      } catch { /* ignore */ }
+    }
+
+    // In-memory saqlash (user bazasiga o'z key bilan)
+    const storeKey = `${userId ?? 'anon'}:${project.id}`;
+    plumbingStore.set(storeKey, project);
+
+    console.log(`[PLUMBING] OK — ${project.rooms.length} xona, ${project.fixtures.length} jihoz, ${project.pipes.length} truba`);
+    return res.json({ project });
+  } catch (err) {
+    console.error('[PLUMBING] generate error:', err);
+    res.status(500).json({ error: 'Santexnika loyihasini yaratishda xatolik', message: (err as Error).message });
+  }
+});
+
+// GET /api/plumbing/:id — loyihani olish
+app.get('/api/plumbing/:id', async (req, res) => {
+  const { id } = req.params;
+  const authHeader = req.headers.authorization;
+  let userId: string | null = null;
+  if (authHeader) {
+    try {
+      const { createClient } = await import('@supabase/supabase-js');
+      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
+      const { data } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
+      userId = data.user?.id ?? null;
+    } catch { /* ignore */ }
+  }
+
+  const storeKey = `${userId ?? 'anon'}:${id}`;
+  const project = plumbingStore.get(storeKey) ?? plumbingStore.get(`anon:${id}`);
+  if (!project) return res.status(404).json({ error: 'Loyiha topilmadi' });
+  return res.json({ project });
+});
+
+// GET /api/plumbing — user loyihalari ro'yxati
+app.get('/api/plumbing', async (req, res) => {
+  const authHeader = req.headers.authorization;
+  let userId = 'anon';
+  if (authHeader) {
+    try {
+      const { createClient } = await import('@supabase/supabase-js');
+      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
+      const { data } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
+      if (data.user?.id) userId = data.user.id;
+    } catch { /* ignore */ }
+  }
+
+  const prefix = `${userId}:`;
+  const projects: PlumbingProject[] = [];
+  for (const [key, val] of plumbingStore) {
+    if (key.startsWith(prefix)) projects.push(val);
+  }
+  projects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  return res.json({ projects });
+});
+
+// PATCH /api/plumbing/:id — manual edit (qo'lda element qo'shish/o'chirish/ko'chirish)
+app.patch('/api/plumbing/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { action, payload } = req.body;
+    // action: 'add_fixture' | 'remove_fixture' | 'move_fixture' | 'update_name' | 'update_layer'
+
+    const authHeader = req.headers.authorization;
+    let userId = 'anon';
+    if (authHeader) {
+      try {
+        const { createClient } = await import('@supabase/supabase-js');
+        const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
+        const { data } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
+        if (data.user?.id) userId = data.user.id;
+      } catch { /* ignore */ }
+    }
+
+    const storeKey = `${userId}:${id}`;
+    let project = plumbingStore.get(storeKey);
+    if (!project) return res.status(404).json({ error: 'Loyiha topilmadi' });
+
+    if (action === 'add_fixture') {
+      const { roomId, type, position } = payload;
+      project = plumbingProjectEngine.addFixture(project, roomId, type, position);
+    } else if (action === 'remove_fixture') {
+      project = plumbingProjectEngine.removeFixture(project, payload.fixtureId);
+    } else if (action === 'move_fixture') {
+      project = plumbingProjectEngine.moveFixture(project, payload.fixtureId, payload.position);
+    } else if (action === 'update_name') {
+      project = { ...project, name: payload.name, updatedAt: new Date().toISOString() };
+    } else if (action === 'update_layer') {
+      const layers = project.layers.map(l => l.id === payload.layerId ? { ...l, visible: payload.visible } : l);
+      project = { ...project, layers, updatedAt: new Date().toISOString() };
+    } else if (action === 'update_view') {
+      project = { ...project, activeView: payload.view, activeFloor: payload.floor ?? project.activeFloor };
+    }
+
+    plumbingStore.set(storeKey, project);
+    return res.json({ project });
+  } catch (err) {
+    console.error('[PLUMBING] patch error:', err);
+    res.status(500).json({ error: 'O\'zgartirishda xatolik', message: (err as Error).message });
+  }
+});
+
+// POST /api/plumbing/:id/ai-edit — AI matn buyrug'i bilan edit
+app.post('/api/plumbing/:id/ai-edit', requireCredits('plumbing_edit'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { message } = req.body;
+    if (!message) return res.status(400).json({ error: 'message required' });
+
+    const authHeader = req.headers.authorization;
+    let userId = 'anon';
+    if (authHeader) {
+      try {
+        const { createClient } = await import('@supabase/supabase-js');
+        const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
+        const { data } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
+        if (data.user?.id) userId = data.user.id;
+      } catch { /* ignore */ }
+    }
+
+    const storeKey = `${userId}:${id}`;
+    const project = plumbingStore.get(storeKey);
+    if (!project) return res.status(404).json({ error: 'Loyiha topilmadi' });
+
+    // Mavjud spec reconstruct
+    const currentSpec: PlumbingProjectSpec = {
+      floorCount: project.floorCount,
+      floorHeight: project.floorHeight,
+      buildingWidth: project.buildingWidth,
+      buildingLength: project.buildingLength,
+      rooms: project.rooms.map(r => ({
+        name: r.name,
+        type: r.type,
+        floor: r.floor,
+        width: r.width,
+        length: r.length,
+        fixtures: project.fixtures.filter(f => f.roomId === r.id).map(f => f.type),
+      })),
+    };
+
+    const specPatch = await plumbingAIParser.applyEdit(message, currentSpec);
+    const mergedSpec = { ...currentSpec, ...specPatch };
+    const updatedProject = plumbingProjectEngine.generate(mergedSpec, project.id);
+    updatedProject.name = project.name;
+    updatedProject.description = project.description;
+    updatedProject.createdAt = project.createdAt;
+
+    plumbingStore.set(storeKey, updatedProject);
+    console.log(`[PLUMBING] ai-edit OK: "${message.slice(0, 40)}"`);
+    return res.json({ project: updatedProject });
+  } catch (err) {
+    console.error('[PLUMBING] ai-edit error:', err);
+    res.status(500).json({ error: 'AI tahrirda xatolik', message: (err as Error).message });
+  }
+});
+
+// POST /api/plumbing/:id/regenerate — spec o'zgarsa qayta generate
+app.post('/api/plumbing/:id/regenerate', requireCredits('plumbing_generate'), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { spec } = req.body;
+
+    const authHeader = req.headers.authorization;
+    let userId = 'anon';
+    if (authHeader) {
+      try {
+        const { createClient } = await import('@supabase/supabase-js');
+        const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
+        const { data } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
+        if (data.user?.id) userId = data.user.id;
+      } catch { /* ignore */ }
+    }
+
+    const storeKey = `${userId}:${id}`;
+    const existing = plumbingStore.get(storeKey);
+    if (!existing && !spec) return res.status(404).json({ error: 'Loyiha topilmadi' });
+
+    const finalSpec: PlumbingProjectSpec = spec ?? {
+      floorCount: existing!.floorCount,
+      floorHeight: existing!.floorHeight,
+      buildingWidth: existing!.buildingWidth,
+      buildingLength: existing!.buildingLength,
+      rooms: existing!.rooms.map(r => ({
+        name: r.name, type: r.type, floor: r.floor, width: r.width, length: r.length,
+        fixtures: existing!.fixtures.filter(f => f.roomId === r.id).map(f => f.type),
+      })),
+    };
+
+    const project = plumbingProjectEngine.generate(finalSpec, id);
+    if (existing) { project.name = existing.name; project.createdAt = existing.createdAt; }
+    plumbingStore.set(storeKey, project);
+    return res.json({ project });
+  } catch (err) {
+    console.error('[PLUMBING] regenerate error:', err);
+    res.status(500).json({ error: 'Qayta generatsiyada xatolik', message: (err as Error).message });
+  }
+});
+
 // SPA fallback — serve index.html for all non-API routes in production
 if (process.env.NODE_ENV === 'production') {
   const clientDist = join(process.cwd(), 'client', 'dist');

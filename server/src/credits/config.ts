@@ -15,6 +15,10 @@ export const CREDIT_COSTS = {
   // Simple Generator (floor plan)
   simple_generate:   2,   // oddiy floor plan
   simple_edit:       1,   // edit
+
+  // Plumbing module
+  plumbing_generate: 5,   // santexnika loyiha generatsiya
+  plumbing_edit:     2,   // AI tahrirlash
 } as const;
 
 export type CreditAction = keyof typeof CREDIT_COSTS;

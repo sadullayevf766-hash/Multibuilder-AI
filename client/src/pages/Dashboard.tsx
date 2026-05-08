@@ -204,6 +204,65 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* Sohalar — quick access */}
+        <div className="mb-8">
+          <div className="text-xs text-white/30 uppercase tracking-wider mb-3">Sohalar bo'yicha modullar</div>
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {[
+              {
+                label: 'Santexnika',
+                desc: 'Suv ta\'minoti, kanalizatsiya, isitish',
+                icon: '🔧',
+                color: 'from-blue-600/20 to-blue-500/10',
+                border: 'border-blue-500/20 hover:border-blue-500/40',
+                path: '/plumbing',
+                badge: 'Yangi',
+              },
+              {
+                label: 'Elektr',
+                desc: 'Kabel, rozetka, panel',
+                icon: '⚡',
+                color: 'from-yellow-600/20 to-yellow-500/10',
+                border: 'border-yellow-500/20 hover:border-yellow-500/30',
+                path: '/select',
+                badge: null,
+              },
+              {
+                label: 'Arxitektura',
+                desc: 'Reja, fasad, kesim',
+                icon: '🏛',
+                color: 'from-purple-600/20 to-purple-500/10',
+                border: 'border-purple-500/20 hover:border-purple-500/30',
+                path: '/select',
+                badge: null,
+              },
+              {
+                label: 'Dizayn',
+                desc: 'Ichki bezak, mebellar',
+                icon: '🛋',
+                color: 'from-rose-600/20 to-rose-500/10',
+                border: 'border-rose-500/20 hover:border-rose-500/30',
+                path: '/select',
+                badge: null,
+              },
+            ].map(m => (
+              <Link key={m.label} to={m.path}
+                className={`flex-shrink-0 w-52 p-4 rounded-xl bg-gradient-to-br ${m.color} border ${m.border} transition-all group`}>
+                <div className="flex items-start justify-between mb-2">
+                  <span className="text-2xl">{m.icon}</span>
+                  {m.badge && (
+                    <span className="text-[10px] bg-blue-500/30 text-blue-400 border border-blue-500/30 px-1.5 py-0.5 rounded-full">
+                      {m.badge}
+                    </span>
+                  )}
+                </div>
+                <div className="font-medium text-sm text-white mb-0.5">{m.label}</div>
+                <div className="text-xs text-white/40">{m.desc}</div>
+              </Link>
+            ))}
+          </div>
+        </div>
+
         {/* Page title */}
         <div className="mb-8 flex items-end justify-between">
           <div>

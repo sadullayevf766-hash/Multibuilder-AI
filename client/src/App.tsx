@@ -16,6 +16,8 @@ import Pricing from './pages/Pricing';
 const SuperGenerator    = lazy(() => import('./pages/SuperGenerator'));
 const MegaBuilder       = lazy(() => import('./pages/MegaBuilder'));
 const MegaProjectDetail = lazy(() => import('./pages/MegaProjectDetail'));
+const PlumbingHub       = lazy(() => import('./pages/PlumbingHub'));
+const PlumbingEditor    = lazy(() => import('./pages/PlumbingEditor'));
 
 function PageLoader() {
   return (
@@ -67,6 +69,17 @@ function App() {
           <Route path="/mega/:id" element={
             <ProtectedRoute>
               <Suspense fallback={<PageLoader />}><MegaProjectDetail /></Suspense>
+            </ProtectedRoute>
+          } />
+          {/* Santexnika moduli */}
+          <Route path="/plumbing" element={
+            <ProtectedRoute>
+              <Suspense fallback={<PageLoader />}><PlumbingHub /></Suspense>
+            </ProtectedRoute>
+          } />
+          <Route path="/plumbing/:id" element={
+            <ProtectedRoute>
+              <Suspense fallback={<PageLoader />}><PlumbingEditor /></Suspense>
             </ProtectedRoute>
           } />
         </Routes>
