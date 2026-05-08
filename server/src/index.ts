@@ -1119,6 +1119,27 @@ app.patch('/api/plumbing/:id', async (req, res) => {
         ),
         updatedAt: new Date().toISOString(),
       };
+    } else if (action === 'remove_pipe') {
+      const { pipeId } = payload as { pipeId: string };
+      project = {
+        ...project,
+        pipes: project.pipes.filter(p => p.id !== pipeId),
+        updatedAt: new Date().toISOString(),
+      };
+    } else if (action === 'update_pipe') {
+      const { pipeId, patch } = payload as { pipeId: string; patch: Partial<typeof project.pipes[0]> };
+      project = {
+        ...project,
+        pipes: project.pipes.map(p => p.id === pipeId ? { ...p, ...patch } : p),
+        updatedAt: new Date().toISOString(),
+      };
+    } else if (action === 'add_pipe') {
+      const { pipe } = payload as { pipe: typeof project.pipes[0] };
+      project = {
+        ...project,
+        pipes: [...project.pipes, pipe],
+        updatedAt: new Date().toISOString(),
+      };
     } else if (action === 'update_name') {
       project = { ...project, name: payload.name, updatedAt: new Date().toISOString() };
     } else if (action === 'update_layer') {

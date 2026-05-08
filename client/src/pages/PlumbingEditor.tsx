@@ -160,18 +160,35 @@ const PIPE_TYPE_LABELS: Record<string, { name: string; color: string }> = {
   drain: { name: 'К1 Kanalizatsiya',     color: '#92400e' },
 };
 
+const DIAMETERS: Record<string, number[]> = {
+  cold:  [15, 20, 25, 32, 40, 50],
+  hot:   [15, 20, 25, 32, 40, 50],
+  circ:  [15, 20, 25, 32],
+  drain: [50, 75, 100, 110, 160],
+};
+const MATERIALS: Record<string, string[]> = {
+  cold:  ['ppr', 'copper', 'hdpe'],
+  hot:   ['ppr', 'copper'],
+  circ:  ['ppr', 'copper'],
+  drain: ['pvc', 'hdpe', 'steel'],
+};
+
 function PropertiesPanel({
   project,
   selectedId,
   selectedPipeId,
   onRemove,
   onResize,
+  onUpdatePipe,
+  onRemovePipe,
 }: {
   project: PlumbingProject;
   selectedId: string | null;
   selectedPipeId: string | null;
   onRemove: (id: string) => void;
   onResize: (id: string, dims: { w?: number; d?: number; h?: number }) => void;
+  onUpdatePipe: (id: string, patch: Record<string, unknown>) => void;
+  onRemovePipe: (id: string) => void;
 }) {
   const fix  = project.fixtures.find(f => f.id === selectedId);
   const pipe = project.pipes.find(p => p.id === selectedPipeId);
@@ -184,40 +201,84 @@ function PropertiesPanel({
       (pipe.to.y - pipe.from.y) ** 2 +
       (pipe.to.z - pipe.from.z) ** 2
     );
+    const diams = DIAMETERS[pipe.type] ?? [20, 25, 32, 50, 110];
+    const mats  = MATERIALS[pipe.type] ?? ['ppr', 'pvc'];
+
     return (
       <div className="w-56 flex-shrink-0 border-l border-white/5 bg-[#0a0a16] flex flex-col">
-        <div className="px-3 py-3 border-b border-white/5">
+        <div className="px-3 py-3 border-b border-white/5 flex items-center justify-between">
           <div className="text-xs font-semibold text-white/40 uppercase tracking-wider">Truba</div>
+          <button onClick={() => onRemovePipe(pipe.id)}
+            className="text-red-400/60 hover:text-red-400 transition-colors text-xs">
+            O'chir
+          </button>
         </div>
-        <div className="flex-1 p-3 space-y-3">
+        <div className="flex-1 overflow-y-auto p-3 space-y-4">
+          {/* Tip */}
           <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full" style={{ background: ptype.color }} />
+            <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: ptype.color }} />
             <span className="text-sm font-medium">{ptype.name}</span>
           </div>
-          {pipe.label && <div className="text-xs text-white/40">{pipe.label}</div>}
+          {pipe.label && <div className="text-xs text-white/30 font-mono">{pipe.label}</div>}
+
+          {/* Diametr */}
+          <div className="space-y-1.5">
+            <div className="text-xs text-white/30 uppercase tracking-wider">Diametr</div>
+            <div className="flex flex-wrap gap-1">
+              {diams.map(d => (
+                <button key={d}
+                  onClick={() => onUpdatePipe(pipe.id, { diamMm: d })}
+                  className={`px-2 py-0.5 rounded text-xs font-mono transition-colors ${
+                    pipe.diamMm === d
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white/5 text-white/50 hover:bg-white/10'
+                  }`}>
+                  ø{d}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Material */}
+          <div className="space-y-1.5">
+            <div className="text-xs text-white/30 uppercase tracking-wider">Material</div>
+            <div className="flex flex-wrap gap-1">
+              {mats.map(m => (
+                <button key={m}
+                  onClick={() => onUpdatePipe(pipe.id, { material: m })}
+                  className={`px-2 py-0.5 rounded text-xs uppercase transition-colors ${
+                    pipe.material === m
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white/5 text-white/50 hover:bg-white/10'
+                  }`}>
+                  {m}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Info */}
           <div className="space-y-1.5">
             {[
-              { label: 'Diametr',   val: `ø${pipe.diamMm} mm` },
-              { label: 'Uzunlik',   val: `${len.toFixed(2)} m` },
-              { label: 'Material',  val: pipe.material.toUpperCase() },
-              { label: 'Qavat',     val: `${pipe.floor}-qavat` },
-              { label: 'Stoyak',    val: pipe.isRiser ? 'Ha' : 'Yo\'q' },
+              { label: 'Uzunlik', val: `${len.toFixed(2)} m` },
+              { label: 'Qavat',   val: `${pipe.floor}-qavat` },
+              { label: 'Stoyak',  val: pipe.isRiser ? 'Ha' : "Yo'q" },
+              ...(pipe.slope !== undefined ? [{ label: 'Qiyalik', val: `${pipe.slope}‰` }] : []),
             ].map(s => (
               <div key={s.label} className="flex justify-between text-xs">
                 <span className="text-white/40">{s.label}</span>
                 <span className="text-white/70 font-mono">{s.val}</span>
               </div>
             ))}
-            {pipe.slope !== undefined && (
-              <div className="flex justify-between text-xs">
-                <span className="text-white/40">Qiyalik</span>
-                <span className="text-white/70 font-mono">{pipe.slope}‰</span>
-              </div>
-            )}
           </div>
-          <div className="pt-1 text-[9px] text-white/20">
-            ({pipe.from.x.toFixed(2)},{pipe.from.y.toFixed(2)},{pipe.from.z.toFixed(2)}) →<br/>
+
+          <div className="text-[9px] text-white/20 font-mono leading-relaxed">
+            ({pipe.from.x.toFixed(2)},{pipe.from.y.toFixed(2)},{pipe.from.z.toFixed(2)})→<br/>
             ({pipe.to.x.toFixed(2)},{pipe.to.y.toFixed(2)},{pipe.to.z.toFixed(2)})
+          </div>
+
+          <div className="text-[9px] text-white/20 pt-1">
+            Backspace — o'chirish
           </div>
         </div>
       </div>
@@ -467,6 +528,7 @@ export default function PlumbingEditor() {
   const [selectedId, setSelectedId]   = useState<string | null>(null);
   const [selectedPipeId, setSelectedPipeId] = useState<string | null>(null);
   const [draggingLibType, setDraggingLibType] = useState<string | null>(null);
+  const [drawPipeMode, setDrawPipeMode] = useState<{ type: string; material: string; diamMm: number } | null>(null);
   const [showAIEdit, setShowAIEdit]   = useState(false);
   const [showLayers, setShowLayers]   = useState(false);
   const [showLibrary, setShowLibrary] = useState(true);
@@ -600,6 +662,103 @@ export default function PlumbingEditor() {
     } catch {}
   }, [id, activeFloor]);
 
+  // Pipe update (diametr, material)
+  const handleUpdatePipe = useCallback(async (pipeId: string, patch: Record<string, unknown>) => {
+    if (!id) return;
+    const cur = projectRef.current;
+    if (!cur) return;
+    const optimistic: PlumbingProject = {
+      ...cur,
+      pipes: cur.pipes.map(p => p.id === pipeId ? { ...p, ...patch } : p),
+    };
+    setProject(optimistic);
+    try {
+      const token = await getToken();
+      await fetch(apiUrl(`/api/plumbing/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'update_pipe', payload: { pipeId, patch } }),
+      });
+    } catch {}
+  }, [id]);
+
+  // Pipe o'chirish
+  const handleRemovePipe = useCallback(async (pipeId: string) => {
+    if (!id) return;
+    const cur = projectRef.current;
+    if (!cur) return;
+    const optimistic: PlumbingProject = {
+      ...cur,
+      pipes: cur.pipes.filter(p => p.id !== pipeId),
+    };
+    setProject(optimistic);
+    setSelectedPipeId(null);
+    try {
+      const token = await getToken();
+      await fetch(apiUrl(`/api/plumbing/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'remove_pipe', payload: { pipeId } }),
+      });
+    } catch {}
+  }, [id]);
+
+  // Pipe endpoint drag commit
+  const handleMovePipeEndpoint = useCallback(async (
+    pipeId: string,
+    end: 'from' | 'to',
+    pos: { x: number; y: number; z: number }
+  ) => {
+    if (!id) return;
+    const cur = projectRef.current;
+    if (!cur) return;
+    const optimistic: PlumbingProject = {
+      ...cur,
+      pipes: cur.pipes.map(p => p.id === pipeId ? { ...p, [end]: pos } : p),
+    };
+    setProject(optimistic);
+    try {
+      const token = await getToken();
+      const pipe = cur.pipes.find(p => p.id === pipeId);
+      if (!pipe) return;
+      const patch = { [end]: pos };
+      await fetch(apiUrl(`/api/plumbing/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'update_pipe', payload: { pipeId, patch } }),
+      });
+    } catch {}
+  }, [id]);
+
+  // Yangi quvur qo'shish
+  const handleAddPipe = useCallback(async (pipe: {
+    type: string; material: string; diamMm: number;
+    from: { x: number; y: number; z: number };
+    to:   { x: number; y: number; z: number };
+    floor: number;
+  }) => {
+    if (!id) return;
+    const cur = projectRef.current;
+    if (!cur) return;
+    const newPipe = {
+      id: `pipe-manual-${Date.now()}`,
+      isRiser: false, isMain: false,
+      ...pipe,
+      type: pipe.type as import('../engine/plumbing-types').PipeType,
+      material: pipe.material as import('../engine/plumbing-types').PipeMaterial,
+    };
+    const optimistic: PlumbingProject = { ...cur, pipes: [...cur.pipes, newPipe] };
+    setProject(optimistic);
+    try {
+      const token = await getToken();
+      await fetch(apiUrl(`/api/plumbing/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'add_pipe', payload: { pipe: newPipe } }),
+      });
+    } catch {}
+  }, [id]);
+
   // Library element click (eski) — birinchi xonaga qo'yish
   const handleLibraryAdd = useCallback(async (type: FixtureType) => {
     if (!id || !project) return;
@@ -701,6 +860,34 @@ export default function PlumbingEditor() {
           Qatlamlar
         </button>
 
+        {/* Quvur chizish mode */}
+        {activeView === 'top' && (
+          <div className="flex items-center gap-0.5 bg-black/30 border border-white/10 rounded-lg p-0.5">
+            <button onClick={() => setDrawPipeMode(m => m ? null : { type: 'cold', material: 'ppr', diamMm: 20 })}
+              title="Quvur chizish (Top view da 2 nuqta bosing)"
+              className={`px-2 py-1 rounded text-xs transition-colors ${drawPipeMode ? 'bg-blue-600 text-white' : 'text-white/40 hover:text-white/60'}`}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="inline mr-1">
+                <line x1="5" y1="12" x2="19" y2="12"/><polyline points="15,8 19,12 15,16"/>
+              </svg>
+              Truba
+            </button>
+            {drawPipeMode && (
+              <>
+                {(['cold','hot','drain'] as const).map(t => (
+                  <button key={t} onClick={() => setDrawPipeMode(m => m ? { ...m, type: t } : null)}
+                    className={`px-1.5 py-1 rounded text-[10px] transition-colors ${drawPipeMode.type === t ? 'bg-white/20 text-white' : 'text-white/40 hover:text-white/60'}`}>
+                    {t === 'cold' ? 'В1' : t === 'hot' ? 'Т3' : 'К1'}
+                  </button>
+                ))}
+                <button onClick={() => { setDrawPipeMode(null); }}
+                  className="px-1.5 py-1 rounded text-[10px] text-red-400 hover:bg-red-500/10 transition-colors">
+                  ✕
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
         <div className="flex-1" />
 
         {/* AI Edit */}
@@ -761,13 +948,17 @@ export default function PlumbingEditor() {
               activeFloor={activeFloor}
               selectedId={selectedId}
               selectedPipeId={selectedPipeId}
-              onSelectFixture={id => { setSelectedId(id); if (id) setSelectedPipeId(null); }}
-              onSelectPipe={id => { setSelectedPipeId(id); if (id) setSelectedId(null); }}
+              onSelectFixture={fid => { setSelectedId(fid); if (fid) setSelectedPipeId(null); }}
+              onSelectPipe={pid => { setSelectedPipeId(pid); if (pid) setSelectedId(null); }}
               onMoveFixture={handleMoveFixture}
               onResizeFixture={handleResizeFixture}
               onRemoveFixture={handleRemoveFixture}
+              onRemovePipe={handleRemovePipe}
+              onMovePipeEndpoint={handleMovePipeEndpoint}
+              onAddPipe={handleAddPipe}
               onDropFixture={handleDropFixture}
               draggingLibType={draggingLibType}
+              drawPipeMode={drawPipeMode}
               layers={layerVis}
             />
           ) : (
@@ -809,6 +1000,8 @@ export default function PlumbingEditor() {
             selectedPipeId={selectedPipeId}
             onRemove={handleRemoveFixture}
             onResize={handleResizeFixture}
+            onUpdatePipe={handleUpdatePipe}
+            onRemovePipe={handleRemovePipe}
           />
         )}
       </div>

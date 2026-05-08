@@ -744,8 +744,12 @@ interface Props {
   onMoveFixture?: (id: string, pos: { x: number; y: number; z: number }) => void;
   onResizeFixture?: (id: string, dims: { w?: number; d?: number }) => void;
   onRemoveFixture?: (id: string) => void;
+  onRemovePipe?: (id: string) => void;
+  onMovePipeEndpoint?: (id: string, end: 'from'|'to', pos: { x:number; y:number; z:number }) => void;
+  onAddPipe?: (pipe: { type: string; material: string; diamMm: number; from: {x:number;y:number;z:number}; to: {x:number;y:number;z:number}; floor: number }) => void;
   onDropFixture?: (type: string, pos: { x: number; y: number; z: number }) => void;
-  draggingLibType?: string | null;  // kutubxonadan drag qilinayotgan tip
+  draggingLibType?: string | null;
+  drawPipeMode?: { type: string; material: string; diamMm: number } | null;
   layers: Record<string, boolean>;
 }
 
@@ -753,8 +757,9 @@ export default function PlumbingCanvas2D({
   project, view, activeFloor,
   selectedId, selectedPipeId,
   onSelectFixture, onSelectPipe,
-  onMoveFixture, onResizeFixture, onRemoveFixture, onDropFixture,
-  draggingLibType, layers,
+  onMoveFixture, onResizeFixture, onRemoveFixture, onRemovePipe,
+  onMovePipeEndpoint, onAddPipe,
+  onDropFixture, draggingLibType, drawPipeMode, layers,
 }: Props) {
   const canvasRef    = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -767,8 +772,15 @@ export default function PlumbingCanvas2D({
   const resizingFix     = useRef<{ id: string; dir: HandleDir; origDims: { w: number; d: number }; origPos: { x: number; y: number }; startWx: number; startWy: number } | null>(null);
   const [dragPos,    setDragPos]    = useState<{ id: string; x: number; y: number } | null>(null);
   const [resizeDims, setResizeDims] = useState<{ id: string; w: number; d: number } | null>(null);
-  // Library drag: sichqoncha canvas ustida turgan joyda "ghost" ko'rinadi
   const [libGhostPos, setLibGhostPos] = useState<{ x: number; y: number } | null>(null);
+
+  // Pipe endpoint drag
+  const draggingEndpoint = useRef<{ pipeId: string; end: 'from'|'to'; origPos: {x:number;y:number;z:number} } | null>(null);
+  const [endpointDragPos, setEndpointDragPos] = useState<{ pipeId: string; end: 'from'|'to'; x:number; y:number } | null>(null);
+
+  // Pipe draw mode: birinchi nuqta bosilganidan keyin rubber-band
+  const pipeDrawStart = useRef<{ x:number; y:number; z:number } | null>(null);
+  const [pipeDrawCursor, setPipeDrawCursor] = useState<{ wx:number; wy:number } | null>(null);
 
   const getSize = () => {
     const c = containerRef.current;
@@ -918,17 +930,45 @@ export default function PlumbingCanvas2D({
       }
     }
 
-    // Pipe selection highlight
+    // Pipe selection highlight + endpoint handles
     if (selectedPipeId) {
       const pipe = project.pipes.find(p => p.id === selectedPipeId);
       if (pipe) {
-        const p1 = projectPt(pipe.from, view, project.buildingWidth, project.buildingLength, project.floorHeight, project.floorCount);
-        const p2 = projectPt(pipe.to,   view, project.buildingWidth, project.buildingLength, project.floorHeight, project.floorCount);
+        // Endpoint drag preview
+        const fromPt = endpointDragPos?.pipeId === pipe.id && endpointDragPos.end === 'from'
+          ? { x: endpointDragPos.x, y: endpointDragPos.y }
+          : projectPt(pipe.from, view, project.buildingWidth, project.buildingLength, project.floorHeight, project.floorCount);
+        const toPt = endpointDragPos?.pipeId === pipe.id && endpointDragPos.end === 'to'
+          ? { x: endpointDragPos.x, y: endpointDragPos.y }
+          : projectPt(pipe.to, view, project.buildingWidth, project.buildingLength, project.floorHeight, project.floorCount);
+
         ctx.save();
-        ctx.strokeStyle = '#f97316'; ctx.lineWidth = 4; ctx.setLineDash([6,3]);
-        ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
-        ctx.setLineDash([]); ctx.restore();
+        ctx.strokeStyle = '#f97316'; ctx.lineWidth = 3; ctx.setLineDash([5,3]);
+        ctx.beginPath(); ctx.moveTo(fromPt.x, fromPt.y); ctx.lineTo(toPt.x, toPt.y); ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Endpoint handles (2 ta katta doira)
+        [fromPt, toPt].forEach(pt => {
+          ctx.fillStyle = '#fff'; ctx.strokeStyle = '#f97316'; ctx.lineWidth = 2;
+          ctx.beginPath(); ctx.arc(pt.x, pt.y, 6, 0, Math.PI*2);
+          ctx.fill(); ctx.stroke();
+        });
+        ctx.restore();
       }
+    }
+
+    // Pipe draw rubber-band (drawPipeMode aktiv bo'lganda)
+    if (drawPipeMode && pipeDrawStart.current && pipeDrawCursor) {
+      const p1 = projectPt(pipeDrawStart.current, view, project.buildingWidth, project.buildingLength, project.floorHeight, project.floorCount);
+      ctx.save();
+      ctx.strokeStyle = PIPE_COLORS[drawPipeMode.type] ?? '#888';
+      ctx.lineWidth = 2; ctx.setLineDash([6,3]);
+      ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(pipeDrawCursor.wx, pipeDrawCursor.wy); ctx.stroke();
+      ctx.setLineDash([]);
+      // Start nuqta belgisi
+      ctx.fillStyle = ctx.strokeStyle;
+      ctx.beginPath(); ctx.arc(p1.x, p1.y, 5, 0, Math.PI*2); ctx.fill();
+      ctx.restore();
     }
 
     // Library ghost — drag qilinayotgan element preview
@@ -966,7 +1006,7 @@ export default function PlumbingCanvas2D({
     // 8. Shtamp
     drawStamp(ctx, W, H, project, activeFloor);
 
-  }, [project, view, activeFloor, selectedId, selectedPipeId, offset, scale, layers, dragPos, resizeDims, libGhostPos, draggingLibType]);
+  }, [project, view, activeFloor, selectedId, selectedPipeId, offset, scale, layers, dragPos, resizeDims, libGhostPos, draggingLibType, endpointDragPos, pipeDrawCursor, drawPipeMode]);
 
   useEffect(() => { draw(); }, [draw]);
 
@@ -1077,6 +1117,19 @@ export default function PlumbingCanvas2D({
     return null;
   }
 
+  // Tanlangan pipe endpoint hit test
+  function hitPipeEndpoint(wx: number, wy: number): { pipeId: string; end: 'from'|'to' } | null {
+    if (!selectedPipeId) return null;
+    const pipe = project.pipes.find(p => p.id === selectedPipeId);
+    if (!pipe) return null;
+    const r = 10 / scale; // world units
+    for (const end of ['from', 'to'] as const) {
+      const pt = projectPt(pipe[end], view, project.buildingWidth, project.buildingLength, project.floorHeight, project.floorCount);
+      if (Math.hypot(wx - pt.x, wy - pt.y) <= r) return { pipeId: pipe.id, end };
+    }
+    return null;
+  }
+
   function hitPipe(wx: number, wy: number): string | null {
     const pipes = filterPipesByView(project.pipes, view, activeFloor);
     for (const pipe of [...pipes].reverse()) {
@@ -1107,12 +1160,40 @@ export default function PlumbingCanvas2D({
     const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
     const { x: wx, y: wy } = worldPt(sx, sy);
 
+    // 0. Pipe draw mode — 2 nuqta bosib truba chizish
+    if (drawPipeMode && view === 'top') {
+      const mx = w2m(wx), my = w2m(wy);
+      const z = (activeFloor - 1) * project.floorHeight + 0.3;
+      if (!pipeDrawStart.current) {
+        pipeDrawStart.current = { x: mx, y: my, z };
+        setCursorStyle('crosshair');
+      } else {
+        const from = pipeDrawStart.current;
+        const to = { x: mx, y: my, z };
+        onAddPipe?.({ ...drawPipeMode, from, to, floor: activeFloor });
+        pipeDrawStart.current = null;
+        setPipeDrawCursor(null);
+        setCursorStyle('crosshair');
+      }
+      lastMouse.current = { x: sx, y: sy };
+      return;
+    }
+
     // 1. Library drag drop
     if (draggingLibType && view === 'top') {
       const mx = w2m(wx), my = w2m(wy);
       const floor = activeFloor;
       onDropFixture?.(draggingLibType, { x: mx, y: my, z: (floor-1)*project.floorHeight });
       setLibGhostPos(null);
+      lastMouse.current = { x: sx, y: sy };
+      return;
+    }
+
+    // 1b. Pipe endpoint drag
+    const epHit = hitPipeEndpoint(wx, wy);
+    if (epHit) {
+      const pipe = project.pipes.find(p => p.id === epHit.pipeId)!;
+      draggingEndpoint.current = { pipeId: epHit.pipeId, end: epHit.end, origPos: pipe[epHit.end] };
       lastMouse.current = { x: sx, y: sy };
       return;
     }
@@ -1162,6 +1243,22 @@ export default function PlumbingCanvas2D({
     const sx = e.clientX - rect.left, sy = e.clientY - rect.top;
     const dx = sx - lastMouse.current.x, dy = sy - lastMouse.current.y;
     const { x: wx, y: wy } = worldPt(sx, sy);
+
+    // Pipe draw mode cursor
+    if (drawPipeMode) {
+      if (pipeDrawStart.current) setPipeDrawCursor({ wx, wy });
+      setCursorStyle('crosshair');
+      lastMouse.current = { x: sx, y: sy };
+      return;
+    }
+
+    // Pipe endpoint drag
+    if (draggingEndpoint.current) {
+      setEndpointDragPos({ pipeId: draggingEndpoint.current.pipeId, end: draggingEndpoint.current.end, x: wx, y: wy });
+      setCursorStyle('crosshair');
+      lastMouse.current = { x: sx, y: sy };
+      return;
+    }
 
     // Library ghost
     if (draggingLibType && view === 'top') {
@@ -1223,6 +1320,20 @@ export default function PlumbingCanvas2D({
   }
 
   function onMouseUp(e: React.MouseEvent<HTMLCanvasElement>) {
+    // Endpoint drag commit
+    if (draggingEndpoint.current && endpointDragPos) {
+      const { pipeId, end, origPos } = draggingEndpoint.current;
+      const pipe = project.pipes.find(p => p.id === pipeId);
+      if (pipe) {
+        const mx = w2m(endpointDragPos.x), my = w2m(endpointDragPos.y);
+        onMovePipeEndpoint?.(pipeId, end, { ...origPos, x: mx, y: my });
+      }
+      draggingEndpoint.current = null;
+      setEndpointDragPos(null);
+      setCursorStyle(drawPipeMode ? 'crosshair' : 'default');
+      return;
+    }
+
     // Resize commit
     if (resizingFix.current && resizeDims) {
       onResizeFixture?.(resizeDims.id, { w: resizeDims.w, d: resizeDims.d });
@@ -1239,31 +1350,38 @@ export default function PlumbingCanvas2D({
     isPanning.current = false;
     draggingFix.current = null;
     setDragPos(null);
-    setCursorStyle('default');
+    setCursorStyle(drawPipeMode ? 'crosshair' : 'default');
   }
 
   function onMouseLeave() {
     isPanning.current = false;
     draggingFix.current = null;
     resizingFix.current = null;
+    draggingEndpoint.current = null;
     setDragPos(null);
     setResizeDims(null);
     setLibGhostPos(null);
-    setCursorStyle('default');
+    setEndpointDragPos(null);
+    if (!drawPipeMode) setCursorStyle('default');
   }
 
-  // Backspace / Delete → fixture o'chirish
+  // Backspace / Delete → fixture yoki pipe o'chirish; Escape → pipe draw bekor
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
+      const active = document.activeElement;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
       if (e.key === 'Backspace' || e.key === 'Delete') {
-        const active = document.activeElement;
-        if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
         if (selectedId) { onRemoveFixture?.(selectedId); onSelectFixture(null); }
+        else if (selectedPipeId) { onRemovePipe?.(selectedPipeId); onSelectPipe(null); }
+      }
+      if (e.key === 'Escape') {
+        pipeDrawStart.current = null;
+        setPipeDrawCursor(null);
       }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedId, onRemoveFixture, onSelectFixture]);
+  }, [selectedId, selectedPipeId, onRemoveFixture, onRemovePipe, onSelectFixture, onSelectPipe]);
 
   // Library drag: mouse canvas dan ketganda ghost yo'qolsin
   useEffect(() => {
