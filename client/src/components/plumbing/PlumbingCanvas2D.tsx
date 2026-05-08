@@ -322,15 +322,24 @@ function drawRoom(
   ctx.strokeRect(rx + WALL_T / 2, ry + WALL_T / 2, rw - WALL_T, rl - WALL_T);
   ctx.setLineDash([]);
 
-  // Xona nomi va maydoni — markazda
-  if (rw > 40 && rl > 30 && scale > 0.45) {
+  // Xona nomi va maydoni — markazda, o'lchamga moslashadi
+  if (rw > 30 && rl > 24 && scale > 0.35) {
+    const fontSize = Math.max(7, Math.min(13, rw / 6));
     ctx.fillStyle = C.textPrim;
-    ctx.font      = FONT.header;
+    ctx.font      = `bold ${fontSize}px "Segoe UI", Arial, sans-serif`;
     ctx.textAlign = 'center';
-    ctx.fillText(room.name, rx + rw / 2, ry + rl / 2 - 4);
-    ctx.font      = FONT.small;
-    ctx.fillStyle = C.textSec;
-    ctx.fillText(`${(room.width * room.length).toFixed(1)} m²`, rx + rw / 2, ry + rl / 2 + 9);
+    // Nom kenglikka sig'adigan qilib qisqartir
+    let displayName = room.name;
+    while (ctx.measureText(displayName).width > rw - 8 && displayName.length > 4) {
+      displayName = displayName.slice(0, -1);
+    }
+    if (displayName !== room.name) displayName = displayName.slice(0, -2) + '..';
+    ctx.fillText(displayName, rx + rw / 2, ry + rl / 2 - 3);
+    if (rw > 50 && rl > 36) {
+      ctx.font      = `${Math.max(6, fontSize - 2)}px "Segoe UI", Arial, sans-serif`;
+      ctx.fillStyle = C.textSec;
+      ctx.fillText(`${(room.width * room.length).toFixed(1)} m²`, rx + rw / 2, ry + rl / 2 + fontSize);
+    }
   }
 }
 
@@ -385,8 +394,14 @@ function drawFixtureSymbol(
   const stroke = isSelected ? C.fixSelect : C.fixStroke;
   const fill   = isSelected ? '#fff7ed' : C.fixFill;
   const lw     = isSelected ? 2.0 : LW.fixture;
-  // Haqiqiy o'lcham — metrdan pikselga (scale allaqachon ctx da)
-  // Minimum 20px gacha kattalashtir — kichik scale da ham ko'rinsin
+
+  // Rotation qo'llash — ctx ga save/translate/rotate/restore
+  const rotRad = (fix.rotation ?? 0) * Math.PI / 180;
+  ctx.save();
+  ctx.translate(cx, cy);
+  if (rotRad !== 0) ctx.rotate(rotRad);
+
+  // Haqiqiy o'lcham — metrdan pikselga (rotation OLDIDAN, asl w/d)
   const rawW = m2px(fix.dimensions.w);
   const rawD = m2px(fix.dimensions.d);
   const minPx = 20;
@@ -400,136 +415,125 @@ function drawFixtureSymbol(
   ctx.lineWidth   = lw;
   ctx.setLineDash([]);
 
-  // Har bir fixture uchun haqiqiy o'lcham asosida chizish
-  // cx, cy — fixture markazi; fw, fd — kengligi va chuqurligi px da
-  const hw = fw / 2, hd = fd / 2; // yarim o'lchamlar
+  // Chizish markazlashtirilgan (0,0) da — translate qilindi
+  // cx, cy endi 0,0; hw, hd — yarim o'lchamlar
+  const hw = fw / 2, hd = fd / 2;
 
+  // Barcha chizish (0,0) markazida — ctx.translate(cx,cy) qilingan
   switch (fix.type) {
     case 'toilet': {
-      // Tank (devorga yaqin — yuqorida) + Bowl (oval — pastda)
-      // North wall fixture: tank top = cy - hd + small_gap (devordan ichkarida)
-      const tankGap = hd * 0.12; // devor chizig'idan ichkariga (proportsional)
-      const tankTop = cy - hd + tankGap;
-      const tankH   = hd * 0.32;
+      // Tank yuqorida (-hd), bowl pastda oval
+      const tankGap = hd * 0.10;
+      const tankTop = -hd + tankGap;
+      const tankH   = hd * 0.30;
       const bowlTop = tankTop + tankH + hd * 0.04;
       const bowlH   = hd - tankGap - tankH - hd * 0.04;
-      // Tank
-      ctx.fillRect(cx - hw * 0.78, tankTop, hw * 1.56, tankH);
-      ctx.strokeRect(cx - hw * 0.78, tankTop, hw * 1.56, tankH);
-      // Bowl (oval, fixture qolgan qismini to'ldiradi)
+      ctx.fillRect(-hw * 0.78, tankTop, hw * 1.56, tankH);
+      ctx.strokeRect(-hw * 0.78, tankTop, hw * 1.56, tankH);
       ctx.beginPath();
-      ctx.ellipse(cx, bowlTop + bowlH * 0.5, hw * 0.82, bowlH * 0.5, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, bowlTop + bowlH * 0.5, hw * 0.82, bowlH * 0.5, 0, 0, Math.PI * 2);
       ctx.fill(); ctx.stroke();
       break;
     }
     case 'sink': {
-      // To'rtburchak + ichki oval
-      ctx.fillRect(cx - hw, cy - hd, fw, fd);
-      ctx.strokeRect(cx - hw, cy - hd, fw, fd);
+      ctx.fillRect(-hw, -hd, fw, fd);
+      ctx.strokeRect(-hw, -hd, fw, fd);
       ctx.beginPath();
-      ctx.ellipse(cx, cy, hw * 0.65, hd * 0.6, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, hw * 0.65, hd * 0.6, 0, 0, Math.PI * 2);
       ctx.strokeStyle = C.cold; ctx.lineWidth = 0.8; ctx.stroke();
       ctx.strokeStyle = stroke; ctx.lineWidth = lw;
-      // Kran
       ctx.fillStyle = C.textSec;
-      ctx.beginPath(); ctx.arc(cx, cy - hd * 0.65, Math.max(2, hw * 0.15), 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(0, -hd * 0.65, Math.max(2, hw * 0.15), 0, Math.PI * 2); ctx.fill();
       break;
     }
     case 'kitchen_sink': {
-      ctx.fillRect(cx - hw, cy - hd, fw, fd);
-      ctx.strokeRect(cx - hw, cy - hd, fw, fd);
-      // Ikki hovuz
+      ctx.fillRect(-hw, -hd, fw, fd);
+      ctx.strokeRect(-hw, -hd, fw, fd);
       const gap = 2;
       ctx.strokeStyle = C.cold; ctx.lineWidth = 0.8;
-      ctx.strokeRect(cx - hw + gap, cy - hd + gap, fw / 2 - gap * 1.5, fd - gap * 2);
-      ctx.strokeRect(cx + gap / 2,  cy - hd + gap, fw / 2 - gap * 1.5, fd - gap * 2);
+      ctx.strokeRect(-hw + gap, -hd + gap, fw / 2 - gap * 1.5, fd - gap * 2);
+      ctx.strokeRect(gap / 2,   -hd + gap, fw / 2 - gap * 1.5, fd - gap * 2);
       ctx.strokeStyle = stroke; ctx.lineWidth = lw;
       break;
     }
     case 'bathtub': {
-      ctx.fillRect(cx - hw, cy - hd, fw, fd);
-      ctx.strokeRect(cx - hw, cy - hd, fw, fd);
-      // Ichki oval (cho'milish joyi)
+      ctx.fillRect(-hw, -hd, fw, fd);
+      ctx.strokeRect(-hw, -hd, fw, fd);
       ctx.beginPath();
-      ctx.ellipse(cx, cy + hd * 0.1, hw * 0.7, hd * 0.4, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, hd * 0.1, hw * 0.7, hd * 0.4, 0, 0, Math.PI * 2);
       ctx.strokeStyle = C.cold; ctx.lineWidth = 0.8; ctx.stroke();
       ctx.strokeStyle = stroke; ctx.lineWidth = lw;
-      // Kran (yuqori tomonda)
       ctx.fillStyle = C.textSec;
-      ctx.fillRect(cx - hw + 2, cy - hd + 2, fw - 4, fd * 0.12);
+      ctx.fillRect(-hw + 2, -hd + 2, fw - 4, fd * 0.12);
       break;
     }
     case 'shower': {
-      ctx.fillRect(cx - hw, cy - hd, fw, fd);
-      ctx.strokeRect(cx - hw, cy - hd, fw, fd);
-      // Burchak radius (eshik)
+      ctx.fillRect(-hw, -hd, fw, fd);
+      ctx.strokeRect(-hw, -hd, fw, fd);
       ctx.strokeStyle = C.dimLine; ctx.lineWidth = 0.8;
       ctx.beginPath();
-      ctx.moveTo(cx - hw, cy - hd);
-      ctx.arcTo(cx + hw, cy - hd, cx + hw, cy + hd, Math.min(fw, fd) * 0.9);
+      ctx.moveTo(-hw, -hd);
+      ctx.arcTo(hw, -hd, hw, hd, Math.min(fw, fd) * 0.9);
       ctx.stroke();
-      // Dush boshi
       ctx.strokeStyle = C.cold; ctx.lineWidth = 0.8;
-      ctx.beginPath(); ctx.arc(cx + hw * 0.35, cy - hd * 0.35, Math.max(3, r * 0.35), 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath(); ctx.arc(hw * 0.35, -hd * 0.35, Math.max(3, r * 0.35), 0, Math.PI * 2); ctx.stroke();
       ctx.strokeStyle = stroke; ctx.lineWidth = lw;
       break;
     }
     case 'bidet': {
-      ctx.fillRect(cx - hw, cy - hd, fw, fd);
-      ctx.strokeRect(cx - hw, cy - hd, fw, fd);
+      ctx.fillRect(-hw, -hd, fw, fd);
+      ctx.strokeRect(-hw, -hd, fw, fd);
       ctx.beginPath();
-      ctx.ellipse(cx, cy + hd * 0.1, hw * 0.6, hd * 0.45, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, hd * 0.1, hw * 0.6, hd * 0.45, 0, 0, Math.PI * 2);
       ctx.strokeStyle = C.circ; ctx.lineWidth = 0.8; ctx.stroke();
       ctx.strokeStyle = stroke; ctx.lineWidth = lw;
       break;
     }
     case 'washing_machine':
     case 'dishwasher': {
-      ctx.fillRect(cx - hw, cy - hd, fw, fd);
-      ctx.strokeRect(cx - hw, cy - hd, fw, fd);
+      ctx.fillRect(-hw, -hd, fw, fd);
+      ctx.strokeRect(-hw, -hd, fw, fd);
       const cr = Math.min(hw, hd) * 0.72;
-      ctx.beginPath(); ctx.arc(cx, cy + hd * 0.08, cr, 0, Math.PI * 2);
+      ctx.beginPath(); ctx.arc(0, hd * 0.08, cr, 0, Math.PI * 2);
       ctx.strokeStyle = C.cold; ctx.lineWidth = 0.8; ctx.stroke();
-      ctx.beginPath(); ctx.arc(cx, cy + hd * 0.08, cr * 0.45, -0.6, 2.0);
-      ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, hd * 0.08, cr * 0.45, -0.6, 2.0); ctx.stroke();
       ctx.strokeStyle = stroke; ctx.lineWidth = lw;
       break;
     }
     case 'towel_rail': {
-      ctx.fillRect(cx - hw, cy - hd, fw, fd);
-      ctx.strokeRect(cx - hw, cy - hd, fw, fd);
+      ctx.fillRect(-hw, -hd, fw, fd);
+      ctx.strokeRect(-hw, -hd, fw, fd);
       ctx.strokeStyle = C.hot; ctx.lineWidth = 0.8;
-      const bars = 3;
-      for (let i = 1; i <= bars; i++) {
-        const bx = cx - hw + (fw / (bars + 1)) * i;
-        ctx.beginPath(); ctx.moveTo(bx, cy - hd + 1); ctx.lineTo(bx, cy + hd - 1); ctx.stroke();
+      for (let i = 1; i <= 3; i++) {
+        const bx = -hw + (fw / 4) * i;
+        ctx.beginPath(); ctx.moveTo(bx, -hd + 1); ctx.lineTo(bx, hd - 1); ctx.stroke();
       }
       ctx.strokeStyle = stroke; ctx.lineWidth = lw;
       break;
     }
     case 'floor_drain': {
       const dr = Math.min(hw, hd);
-      ctx.beginPath(); ctx.arc(cx, cy, dr, 0, Math.PI * 2);
+      ctx.beginPath(); ctx.arc(0, 0, dr, 0, Math.PI * 2);
       ctx.fill(); ctx.stroke();
       ctx.strokeStyle = C.drain; ctx.lineWidth = 0.8;
       ctx.beginPath();
-      ctx.moveTo(cx - dr * 0.6, cy); ctx.lineTo(cx + dr * 0.6, cy);
-      ctx.moveTo(cx, cy - dr * 0.6); ctx.lineTo(cx, cy + dr * 0.6);
+      ctx.moveTo(-dr * 0.6, 0); ctx.lineTo(dr * 0.6, 0);
+      ctx.moveTo(0, -dr * 0.6); ctx.lineTo(0, dr * 0.6);
       ctx.stroke();
       ctx.strokeStyle = stroke; ctx.lineWidth = lw;
       break;
     }
     default: {
-      ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
       ctx.fill(); ctx.stroke();
     }
   }
 
-  // Belgi teglari (cold/hot/drain nuqtalar)
+  // Belgi teglari (cold/hot/drain nuqtalar) — rotatsiyadan MUSTAQIL
   if (scale > 0.8) {
-    if (fix.coldIn)   { ctx.fillStyle = C.cold;  ctx.beginPath(); ctx.arc(cx - r * 0.8, cy - r * 0.8, 2.5, 0, Math.PI*2); ctx.fill(); }
-    if (fix.hotIn)    { ctx.fillStyle = C.hot;   ctx.beginPath(); ctx.arc(cx + r * 0.8, cy - r * 0.8, 2.5, 0, Math.PI*2); ctx.fill(); }
-    if (fix.drainOut) { ctx.fillStyle = C.drain; ctx.beginPath(); ctx.arc(cx, cy + r * 0.9, 2.5, 0, Math.PI*2); ctx.fill(); }
+    if (fix.coldIn)   { ctx.fillStyle = C.cold;  ctx.beginPath(); ctx.arc(-r * 0.8, -r * 0.8, 2.5, 0, Math.PI*2); ctx.fill(); }
+    if (fix.hotIn)    { ctx.fillStyle = C.hot;   ctx.beginPath(); ctx.arc( r * 0.8, -r * 0.8, 2.5, 0, Math.PI*2); ctx.fill(); }
+    if (fix.drainOut) { ctx.fillStyle = C.drain; ctx.beginPath(); ctx.arc(0, r * 0.9, 2.5, 0, Math.PI*2); ctx.fill(); }
   }
 
   // IsSelected ko'rsatgich
@@ -537,20 +541,30 @@ function drawFixtureSymbol(
     ctx.strokeStyle = C.fixSelect;
     ctx.lineWidth   = 1;
     ctx.setLineDash([3, 2]);
-    ctx.strokeRect(cx - r - 4, cy - r - 4, (r + 4) * 2, (r + 4) * 2);
+    ctx.strokeRect(-hw - 4, -hd - 4, fw + 8, fd + 8);
     ctx.setLineDash([]);
   }
 
-  // Ism yorlig'i
-  if (scale > 0.7) {
-    const label = fix.nameUz.length > 10 ? fix.nameUz.slice(0, 8) + '..' : fix.nameUz;
-    ctx.fillStyle = C.paper;
+  ctx.restore(); // translate + rotate ni qaytarish — label BUNDAN KEYIN
+
+  // Ism yorlig'i — rotatsiyadan MUSTAQIL (cx, cy da chiziladi)
+  if (scale > 0.55) {
+    // Bounding box yarmi (rotation hisobga olinmagan — label har doim gorizontal)
+    const labelHD = Math.max(rawW, rawD) * boost / 2;
+    const fontSize = Math.max(6, Math.min(9, Math.max(fw, fd) / 5));
+    ctx.font = `${fontSize}px "Segoe UI", Arial, sans-serif`;
+    let label = fix.nameUz;
+    const maxW = Math.max(Math.max(fw, fd) * 1.2, 40);
+    while (ctx.measureText(label).width > maxW && label.length > 4) {
+      label = label.slice(0, -1);
+    }
+    if (label !== fix.nameUz) label = label.slice(0, -2) + '..';
     const tw3 = ctx.measureText(label).width + 4;
-    ctx.fillRect(cx - tw3/2, cy + r + 3, tw3, 10);
+    ctx.fillStyle = 'rgba(255,255,255,0.88)';
+    ctx.fillRect(cx - tw3/2, cy + labelHD + 1, tw3, fontSize + 3);
     ctx.fillStyle = isSelected ? C.fixSelect : C.textSec;
-    ctx.font = FONT.small;
     ctx.textAlign = 'center';
-    ctx.fillText(label, cx, cy + r + 12);
+    ctx.fillText(label, cx, cy + labelHD + fontSize + 2);
   }
 }
 
@@ -938,11 +952,15 @@ export default function PlumbingCanvas2D({
   }
 
   function hitFixture(wx: number, wy: number): string | null {
-    const fixes = project.fixtures.filter(f => f.floor === activeFloor);
+    const fixes = view === 'top' || view === 'bottom'
+      ? project.fixtures.filter(f => f.floor === activeFloor)
+      : project.fixtures;
     for (const fix of [...fixes].reverse()) {
       const p = projectPt(fix.position, view, project.buildingWidth, project.buildingLength, project.floorHeight, project.floorCount);
-      const r = Math.max(10, m2px(Math.min(fix.dimensions.w, fix.dimensions.d)) / 2.2) + 6;
-      if ((wx - p.x) ** 2 + (wy - p.y) ** 2 <= r * r) return fix.id;
+      // Hitbox: fixture bounding box yarmi (rotation hisobga olinmagan, ammo yetarli)
+      const hw = Math.max(12, m2px(fix.dimensions.w) / 2) + 4;
+      const hd = Math.max(12, m2px(fix.dimensions.d) / 2) + 4;
+      if (Math.abs(wx - p.x) <= hw && Math.abs(wy - p.y) <= hd) return fix.id;
     }
     return null;
   }
