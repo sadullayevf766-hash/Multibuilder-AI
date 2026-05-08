@@ -17,6 +17,7 @@ import { apiUrl } from '../lib/api';
 import type { PlumbingProject, ViewType, FixtureType } from '../engine/plumbing-types';
 import { FIXTURE_NAMES } from '../engine/plumbing-types';
 import PlumbingCanvas2D from '../components/plumbing/PlumbingCanvas2D';
+import PdfExportModal from '../components/plumbing/PdfExportModal';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // VIEW CONFIG
@@ -529,6 +530,7 @@ export default function PlumbingEditor() {
   const [selectedPipeId, setSelectedPipeId] = useState<string | null>(null);
   const [draggingLibType, setDraggingLibType] = useState<string | null>(null);
   const [drawPipeMode, setDrawPipeMode] = useState<{ type: string; material: string; diamMm: number } | null>(null);
+  const [showPdfModal, setShowPdfModal] = useState(false);
   const [showAIEdit, setShowAIEdit]   = useState(false);
   const [showLayers, setShowLayers]   = useState(false);
   const [showLibrary, setShowLibrary] = useState(true);
@@ -898,7 +900,8 @@ export default function PlumbingEditor() {
         </button>
 
         {/* Export */}
-        <button className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs transition-colors">
+        <button onClick={() => setShowPdfModal(true)}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs transition-colors">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
             <polyline points="7,10 12,15 17,10"/>
@@ -1005,6 +1008,14 @@ export default function PlumbingEditor() {
           />
         )}
       </div>
+
+      {/* PDF Export Modal */}
+      {showPdfModal && (
+        <PdfExportModal
+          project={project}
+          onClose={() => setShowPdfModal(false)}
+        />
+      )}
     </div>
   );
 }
