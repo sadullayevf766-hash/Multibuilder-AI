@@ -336,104 +336,120 @@ function layoutRooms(spec: PlumbingProjectSpec): PlumbingRoom[] {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// FIXTURE PLACEMENT
+// FIXTURE PLACEMENT — overlap-free, rotation-aware
 // ═══════════════════════════════════════════════════════════════════════════════
 
 let idCounter = 0;
 function uid(prefix: string) { return `${prefix}-${++idCounter}`; }
 
-// Professional joylashuv strategiyasi:
-// - Hammom: unitaz shimoliy devorda, lavabo sharqiy devorda, vanna/dush g'arbiy devorda
-// - Oshxona: lavabo/texnika shimoliy devorda
-// - Kir yuvish: mashina g'arbiy devorda
 type WallSide = 'north' | 'south' | 'east' | 'west';
 
-interface PlacedFixture {
-  type: FixtureType;
-  wall: WallSide;
-  wallOffset: number; // devordan bo'ylab ofset (m)
+// Devorga joylashtirilganda fixture o'lchamlari:
+// north/south → along=w (kengligi), into=d (chuqurligi)
+// east/west   → along=d, into=w  (90° burilgan)
+function getAlongInto(w: number, d: number, wall: WallSide) {
+  return (wall === 'east' || wall === 'west')
+    ? { along: d, into: w }
+    : { along: w, into: d };
 }
 
-// Xona turiga qarab professional tartib
-function getFixturePlacements(fixtures: FixtureType[], roomType: string): PlacedFixture[] {
-  const plans: PlacedFixture[] = [];
-
+// Xona turiga qarab afzal devor
+function preferredWall(type: FixtureType, roomType: string): WallSide {
   if (roomType === 'bathroom' || roomType === 'toilet') {
-    // Standart hammom joylashuvi
-    const wallOffsets: Record<WallSide, number> = { north: 0.15, south: 0.15, east: 0.15, west: 0.15 };
-    for (const type of fixtures) {
-      let wall: WallSide = 'north';
-      if (type === 'toilet')   wall = 'north';
-      else if (type === 'sink' || type === 'bidet') wall = 'east';
-      else if (type === 'bathtub') wall = 'west';
-      else if (type === 'shower') wall = 'east';
-      else if (type === 'towel_rail') wall = 'south';
-      else if (type === 'floor_drain') wall = 'west';
-
-      plans.push({ type, wall, wallOffset: wallOffsets[wall] });
-      wallOffsets[wall] += (FIXTURE_CATALOG[type]?.w ?? 0.5) + 0.08;
-    }
-  } else if (roomType === 'kitchen') {
-    const wallOffsets: Record<WallSide, number> = { north: 0.15, south: 0.15, east: 0.15, west: 0.15 };
-    for (const type of fixtures) {
-      let wall: WallSide = 'north';
-      if (type === 'kitchen_sink') wall = 'north';
-      else if (type === 'dishwasher') wall = 'north';
-      else wall = 'west';
-      plans.push({ type, wall, wallOffset: wallOffsets[wall] });
-      wallOffsets[wall] += (FIXTURE_CATALOG[type]?.w ?? 0.6) + 0.08;
-    }
-  } else if (roomType === 'laundry') {
-    const wallOffsets: Record<WallSide, number> = { north: 0.15, south: 0.15, east: 0.15, west: 0.15 };
-    for (const type of fixtures) {
-      let wall: WallSide = 'west';
-      if (type === 'sink') wall = 'north';
-      plans.push({ type, wall, wallOffset: wallOffsets[wall] });
-      wallOffsets[wall] += (FIXTURE_CATALOG[type]?.w ?? 0.6) + 0.08;
-    }
-  } else {
-    // Fallback: hammasi shimoliy devorda
-    let off = 0.15;
-    for (const type of fixtures) {
-      plans.push({ type, wall: 'north', wallOffset: off });
-      off += (FIXTURE_CATALOG[type]?.w ?? 0.5) + 0.08;
-    }
+    if (type === 'toilet')      return 'north';
+    if (type === 'sink')        return 'east';
+    if (type === 'bathtub')     return 'west';
+    if (type === 'shower')      return 'east';
+    if (type === 'bidet')       return 'north';
+    if (type === 'towel_rail')  return 'south';
+    if (type === 'floor_drain') return 'west';
   }
-
-  return plans;
+  if (roomType === 'kitchen') {
+    if (type === 'kitchen_sink' || type === 'dishwasher') return 'north';
+    return 'west';
+  }
+  if (roomType === 'laundry') {
+    if (type === 'sink') return 'north';
+    return 'west';
+  }
+  return 'north';
 }
 
-// Devor bo'yicha koordinat hisoblash
-function wallPosition(room: PlumbingRoom, wall: WallSide, wallOffset: number, meta: { w: number; d: number }): Vec3 {
-  const { x: rx, y: ry } = room.position;
-  // GAP: devordan ichkariga masofa — fixture d/2 dan katta bo'lishi shart
-  // Aks holda fixture devordan chiqib ketadi
-  const WALL_THICKNESS = 0.12; // 120mm devor qalinligi
-  const CLEARANCE = 0.05;      // qo'shimcha bo'shliq
+// BoundingBox — overlap tekshiruvi uchun
+interface BBox { x1: number; y1: number; x2: number; y2: number; }
+
+function fixtureBBox(cx: number, cy: number, w: number, d: number, wall: WallSide): BBox {
+  const { along, into } = getAlongInto(w, d, wall);
+  // north/south → along=x, into=y; east/west → along=y, into=x
+  if (wall === 'north' || wall === 'south') {
+    return { x1: cx - along/2, y1: cy - into/2, x2: cx + along/2, y2: cy + into/2 };
+  } else {
+    return { x1: cx - into/2, y1: cy - along/2, x2: cx + into/2, y2: cy + along/2 };
+  }
+}
+
+function bboxOverlaps(a: BBox, b: BBox, gap = 0.04): boolean {
+  return a.x1 < b.x2 + gap && a.x2 > b.x1 - gap &&
+         a.y1 < b.y2 + gap && a.y2 > b.y1 - gap;
+}
+
+function bboxInsideRoom(bb: BBox, room: PlumbingRoom, margin = 0.04): boolean {
+  return bb.x1 >= room.position.x + margin &&
+         bb.x2 <= room.position.x + room.width  - margin &&
+         bb.y1 >= room.position.y + margin &&
+         bb.y2 <= room.position.y + room.length - margin;
+}
+
+// Bitta devorda fixture uchun joy topish
+// cursor — devor bo'ylab keyingi bo'sh joy boshi
+function tryPlaceOnWall(
+  room: PlumbingRoom,
+  w: number, d: number,
+  wall: WallSide,
+  cursors: Record<WallSide, number>,
+  placed: BBox[],
+): { pos: { x: number; y: number }; wall: WallSide } | null {
+  const { along, into } = getAlongInto(w, d, wall);
+  const WALL_T = 0.17; // devor qalinligi + clearance
+  const GAP   = 0.05; // fixture'lar orasidagi minimal bo'shliq
+
+  // Devor bo'ylab o'lcham (room.width yoki room.length)
+  const roomAlong = (wall === 'north' || wall === 'south') ? room.width : room.length;
+
+  // Devordan ichkariga masofa (markazgacha)
+  const intoCenter = into / 2 + WALL_T;
+
+  // Devor bo'ylab markaz pozitsiyasi
+  const alongStart = cursors[wall] + along / 2;
+  const alongEnd   = alongStart + along / 2 + GAP;
+
+  if (alongEnd > roomAlong - 0.04) return null; // sig'maydi
+
+  // Global koordinatalar
+  let cx: number, cy: number;
+  const rx = room.position.x, ry = room.position.y;
 
   switch (wall) {
-    case 'north': { // Y pastida, fixture devor ichkarisida
-      const gap = meta.d / 2 + WALL_THICKNESS + CLEARANCE;
-      const fx = Math.min(rx + wallOffset + meta.w / 2, rx + room.width - meta.w / 2 - 0.05);
-      const fy = ry + gap;
-      return { x: fx, y: fy, z: 0 };
-    }
-    case 'south': { // Y yuqorida
-      const gap = meta.d / 2 + WALL_THICKNESS + CLEARANCE;
-      const fx = Math.min(rx + wallOffset + meta.w / 2, rx + room.width - meta.w / 2 - 0.05);
-      return { x: fx, y: ry + room.length - gap, z: 0 };
-    }
-    case 'west': { // X chapida
-      const gap = meta.d / 2 + WALL_THICKNESS + CLEARANCE;
-      const fy = Math.min(ry + wallOffset + meta.w / 2, ry + room.length - meta.w / 2 - 0.05);
-      return { x: rx + gap, y: fy, z: 0 };
-    }
-    case 'east': { // X o'ngida
-      const gap = meta.d / 2 + WALL_THICKNESS + CLEARANCE;
-      const fy = Math.min(ry + wallOffset + meta.w / 2, ry + room.length - meta.w / 2 - 0.05);
-      return { x: rx + room.width - gap, y: fy, z: 0 };
-    }
+    case 'north': cx = rx + alongStart; cy = ry + intoCenter;              break;
+    case 'south': cx = rx + alongStart; cy = ry + room.length - intoCenter; break;
+    case 'west':  cx = rx + intoCenter; cy = ry + alongStart;              break;
+    case 'east':  cx = rx + room.width - intoCenter; cy = ry + alongStart; break;
   }
+
+  const bb = fixtureBBox(cx, cy, w, d, wall);
+
+  // Xona ichida?
+  if (!bboxInsideRoom(bb, room)) return null;
+
+  // Boshqa fixture'lar bilan overlap?
+  for (const other of placed) {
+    if (bboxOverlaps(bb, other)) return null;
+  }
+
+  // Joy topildi — cursорни siljit
+  cursors[wall] += along + GAP;
+  placed.push(bb);
+  return { pos: { x: cx, y: cy }, wall };
 }
 
 function placeFixtures(rooms: PlumbingRoom[], spec: PlumbingProjectSpec, floorHeight: number): PlumbingFixture[] {
@@ -444,27 +460,51 @@ function placeFixtures(rooms: PlumbingRoom[], spec: PlumbingProjectSpec, floorHe
     if (!specRoom) continue;
 
     const baseZ = (room.floor - 1) * floorHeight;
-    const placements = getFixturePlacements(specRoom.fixtures, room.type);
 
-    for (const placement of placements) {
-      const meta = FIXTURE_CATALOG[placement.type];
+    // Har devor uchun cursor: 0.04 clearance dan boshlanadi
+    const cursors: Record<WallSide, number> = { north: 0.04, south: 0.04, east: 0.04, west: 0.04 };
+    // Bu xonada joylashtirilgan fixture BBoxlari
+    const placed: BBox[] = [];
+
+    for (const type of specRoom.fixtures) {
+      const meta = FIXTURE_CATALOG[type];
       if (!meta) continue;
 
-      // Devor bo'yicha pozitsiya
-      let pos = wallPosition(room, placement.wall, placement.wallOffset, meta);
-      pos = { ...pos, z: baseZ };
+      const pref = preferredWall(type, room.type);
+      // Afzal devordan boshlab, keyin qolganlarini sinab ko'r
+      const wallOrder: WallSide[] = [pref, ...(['north','south','east','west'] as WallSide[]).filter(w => w !== pref)];
 
-      // Xona chegarasidan chiqmasligi tekshiruvi
-      pos.x = Math.max(room.position.x + 0.08, Math.min(room.position.x + room.width - 0.08, pos.x));
-      pos.y = Math.max(room.position.y + 0.08, Math.min(room.position.y + room.length - 0.08, pos.y));
+      let result: { pos: { x: number; y: number }; wall: WallSide } | null = null;
+
+      for (const wall of wallOrder) {
+        result = tryPlaceOnWall(room, meta.w, meta.d, wall, cursors, placed);
+        if (result) break;
+      }
+
+      let cx: number, cy: number, usedWall: WallSide;
+
+      if (result) {
+        cx = result.pos.x;
+        cy = result.pos.y;
+        usedWall = result.wall;
+      } else {
+        // Xona juda kichik — majburan markazga
+        cx = room.position.x + room.width / 2;
+        cy = room.position.y + room.length / 2;
+        usedWall = pref;
+        placed.push(fixtureBBox(cx, cy, meta.w, meta.d, usedWall));
+      }
+
+      const rotation = (usedWall === 'east' || usedWall === 'west') ? 90 : 0;
+      const pos: Vec3 = { x: cx, y: cy, z: baseZ };
 
       const fx: PlumbingFixture = {
         id: uid('fix'),
-        type: placement.type,
+        type,
         nameUz: meta.nameUz,
         nameRu: meta.nameRu,
         position: pos,
-        rotation: placement.wall === 'west' || placement.wall === 'east' ? 90 : 0,
+        rotation,
         dimensions: { w: meta.w, d: meta.d, h: meta.h },
         floor: room.floor,
         roomId: room.id,
