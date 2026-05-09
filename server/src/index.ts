@@ -1025,7 +1025,8 @@ async function getPlumbingUserId(authHeader: string | undefined): Promise<string
 }
 
 // POST /api/plumbing/generate — prompt → loyiha generatsiyasi
-app.post('/api/plumbing/generate', requireCredits('plumbing_generate'), async (req, res) => {
+// To'lov tizimi hozircha o'chirilgan — bepul ishlaydi
+app.post('/api/plumbing/generate', async (req, res) => {
   try {
     const { description, name } = req.body;
     if (!description) return res.status(400).json({ error: 'description required' });
@@ -1136,7 +1137,7 @@ app.patch('/api/plumbing/:id', async (req, res) => {
 });
 
 // POST /api/plumbing/:id/ai-edit — AI matn buyrug'i bilan edit
-app.post('/api/plumbing/:id/ai-edit', requireCredits('plumbing_edit'), async (req, res) => {
+app.post('/api/plumbing/:id/ai-edit', async (req, res) => {
   try {
     const { id } = req.params;
     const { message } = req.body;
@@ -1179,7 +1180,7 @@ app.post('/api/plumbing/:id/ai-edit', requireCredits('plumbing_edit'), async (re
 });
 
 // POST /api/plumbing/:id/regenerate — spec o'zgarsa qayta generate
-app.post('/api/plumbing/:id/regenerate', requireCredits('plumbing_generate'), async (req, res) => {
+app.post('/api/plumbing/:id/regenerate', async (req, res) => {
   try {
     const { id } = req.params;
     const { spec } = req.body;
