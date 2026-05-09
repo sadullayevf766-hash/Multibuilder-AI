@@ -61,6 +61,38 @@ const GEMINI_MODELS = [
   'gemini-1.5-flash-8b',
 ];
 
+// Groq — OpenAI-compatible, tez va bepul (Llama 3.x)
+async function callGroq(apiKey: string, userPrompt: string): Promise<string | null> {
+  if (!apiKey) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 25000);
+  try {
+    const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'llama-3.1-8b-instant',
+        messages: [
+          { role: 'system', content: PLUMBING_SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.2,
+        max_tokens: 2000,
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) { console.log('[PLUMBING-AI] Groq error:', res.status); return null; }
+    const data = await res.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const text = data?.choices?.[0]?.message?.content;
+    if (text) { console.log('[PLUMBING-AI] Groq OK'); return text; }
+  } catch (e) {
+    clearTimeout(timer);
+    console.log('[PLUMBING-AI] Groq failed:', (e as Error).message);
+  }
+  return null;
+}
+
 async function callGemini(apiKey: string, userPrompt: string): Promise<string | null> {
   if (!apiKey) return null;
 
@@ -100,7 +132,7 @@ async function callGemini(apiKey: string, userPrompt: string): Promise<string | 
     }
   }
 
-  console.log('[PLUMBING-AI] Gemini failed:', lastErr, '— local fallback');
+  console.log('[PLUMBING-AI] Gemini failed:', lastErr);
   return null;
 }
 
@@ -403,29 +435,40 @@ function expandRoomsForAllFloors(spec: PlumbingProjectSpec, prompt: string): Plu
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export class PlumbingAIParser {
-  private apiKey: string;
+  private geminiKey: string;
+  private groqKey: string;
 
-  constructor(apiKey: string) {
-    this.apiKey = apiKey;
+  constructor(geminiKey: string, groqKey = '') {
+    this.geminiKey = geminiKey;
+    this.groqKey = groqKey;
   }
 
   async parse(userPrompt: string): Promise<PlumbingProjectSpec> {
     console.log('[PLUMBING-AI] Parsing:', userPrompt.slice(0, 80));
 
-    // 1. Gemini orqali parse
-    const geminiText = await callGemini(this.apiKey, userPrompt);
-
     let spec: PlumbingProjectSpec | null = null;
+
+    // 1. Gemini
+    const geminiText = await callGemini(this.geminiKey, userPrompt);
     if (geminiText) {
       spec = parseSpecText(geminiText);
       if (spec && spec.rooms.length > 0) {
         console.log('[PLUMBING-AI] Gemini spec OK —', spec.rooms.length, 'xona');
-      } else {
-        spec = null;
+      } else spec = null;
+    }
+
+    // 2. Groq (Llama) fallback
+    if (!spec && this.groqKey) {
+      const groqText = await callGroq(this.groqKey, userPrompt);
+      if (groqText) {
+        spec = parseSpecText(groqText);
+        if (spec && spec.rooms.length > 0) {
+          console.log('[PLUMBING-AI] Groq spec OK —', spec.rooms.length, 'xona');
+        } else spec = null;
       }
     }
 
-    // 2. Local fallback agar Gemini spec yo'q
+    // 3. Local fallback
     if (!spec) {
       console.log('[PLUMBING-AI] Local parse fallback');
       spec = localParse(userPrompt);
@@ -448,7 +491,7 @@ export class PlumbingAIParser {
       .replace('{CURRENT_SPEC}', specStr)
       .replace('{USER_REQUEST}', userRequest);
 
-    const geminiText = await callGemini(this.apiKey, editPrompt);
+    const geminiText = await callGemini(this.geminiKey, editPrompt) ?? await callGroq(this.groqKey, editPrompt);
     if (!geminiText) return {};
 
     const newSpec = parseSpecText(geminiText);

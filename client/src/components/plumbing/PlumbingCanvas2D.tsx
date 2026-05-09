@@ -859,7 +859,11 @@ export default function PlumbingCanvas2D({
           ctx.strokeRect(p1.x, p1.y - ph, pw, ph);
           if (scale > 0.5) {
             ctx.fillStyle = C.textSec; ctx.font = FONT.small; ctx.textAlign = 'center';
-            ctx.fillText(room.name, p1.x + pw / 2, p1.y - ph / 2);
+            let rname = room.name;
+            while (ctx.measureText(rname).width > pw - 6 && rname.length > 3)
+              rname = rname.slice(0, -1);
+            if (rname !== room.name) rname = rname.slice(0, -2) + '..';
+            ctx.fillText(rname, p1.x + pw / 2, p1.y - ph / 2);
           }
         }
       }

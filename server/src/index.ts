@@ -26,6 +26,14 @@ import { STRIPE_PRICES, upgradePlan, downgradePlan, renewCredits, findOrCreateCu
 dotenv.config({ path: join(process.cwd(), 'server', '.env') });
 dotenv.config({ path: join(process.cwd(), '.env') });
 
+// Windows local dev: SSL revocation check muammosini hal qilish
+// Linux/Render production da bu env var yo'q — ta'sir qilmaydi
+if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') {
+  // Already set via env, no action needed
+} else if (process.platform === 'win32' && process.env.NODE_ENV !== 'production') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+}
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 
@@ -992,44 +1000,46 @@ app.post('/api/generate-facade', requireCredits('super_generate'), async (req, r
 
 import { PlumbingAIParser } from './ai/PlumbingAIParser';
 import { PlumbingProjectEngine } from './engine/PlumbingProjectEngine';
+import { PlumbingStore } from './store/PlumbingStore';
 import type { PlumbingProject, PlumbingProjectSpec } from './engine/PlumbingProjectEngine';
 
-const plumbingAIParser    = new PlumbingAIParser(process.env.GEMINI_API_KEY || '');
+const plumbingAIParser      = new PlumbingAIParser(
+  process.env.GEMINI_API_KEY || '',
+  process.env.GROQ_API_KEY  || '',
+);
 const plumbingProjectEngine = new PlumbingProjectEngine();
+const plumbingStore         = new PlumbingStore(
+  process.env.SUPABASE_URL         || '',
+  process.env.SUPABASE_SERVICE_KEY || '',
+);
 
-// In-memory store (Supabase ga o'tkazish mumkin keyinroq)
-const plumbingStore = new Map<string, PlumbingProject>();
+// User ID olish helper
+async function getPlumbingUserId(authHeader: string | undefined): Promise<string> {
+  if (!authHeader) return 'anon';
+  try {
+    const { createClient } = await import('@supabase/supabase-js');
+    const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
+    const { data } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
+    return data.user?.id ?? 'anon';
+  } catch { return 'anon'; }
+}
 
 // POST /api/plumbing/generate — prompt → loyiha generatsiyasi
 app.post('/api/plumbing/generate', requireCredits('plumbing_generate'), async (req, res) => {
   try {
     const { description, name } = req.body;
     if (!description) return res.status(400).json({ error: 'description required' });
-
     console.log('[PLUMBING] generate:', description.slice(0, 80));
 
-    const spec = await plumbingAIParser.parse(description);
+    const spec    = await plumbingAIParser.parse(description);
     const project = plumbingProjectEngine.generate(spec);
     project.description = description;
     if (name) project.name = name;
 
-    // Auth header bilan user ID olish
-    const authHeader = req.headers.authorization;
-    let userId: string | null = null;
-    if (authHeader) {
-      try {
-        const { createClient } = await import('@supabase/supabase-js');
-        const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
-        const { data } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
-        userId = data.user?.id ?? null;
-      } catch { /* ignore */ }
-    }
+    const userId = await getPlumbingUserId(req.headers.authorization);
+    await plumbingStore.save(userId, project);
 
-    // In-memory saqlash (user bazasiga o'z key bilan)
-    const storeKey = `${userId ?? 'anon'}:${project.id}`;
-    plumbingStore.set(storeKey, project);
-
-    console.log(`[PLUMBING] OK — ${project.rooms.length} xona, ${project.fixtures.length} jihoz, ${project.pipes.length} truba`);
+    console.log(`[PLUMBING] OK — ${project.rooms.length} xona, ${project.fixtures.length} jihoz`);
     return res.json({ project });
   } catch (err) {
     console.error('[PLUMBING] generate error:', err);
@@ -1039,66 +1049,34 @@ app.post('/api/plumbing/generate', requireCredits('plumbing_generate'), async (r
 
 // GET /api/plumbing/:id — loyihani olish
 app.get('/api/plumbing/:id', async (req, res) => {
-  const { id } = req.params;
-  const authHeader = req.headers.authorization;
-  let userId: string | null = null;
-  if (authHeader) {
-    try {
-      const { createClient } = await import('@supabase/supabase-js');
-      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
-      const { data } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
-      userId = data.user?.id ?? null;
-    } catch { /* ignore */ }
-  }
-
-  const storeKey = `${userId ?? 'anon'}:${id}`;
-  const project = plumbingStore.get(storeKey) ?? plumbingStore.get(`anon:${id}`);
+  const userId  = await getPlumbingUserId(req.headers.authorization);
+  const project = await plumbingStore.get(userId, req.params.id);
   if (!project) return res.status(404).json({ error: 'Loyiha topilmadi' });
   return res.json({ project });
 });
 
 // GET /api/plumbing — user loyihalari ro'yxati
 app.get('/api/plumbing', async (req, res) => {
-  const authHeader = req.headers.authorization;
-  let userId = 'anon';
-  if (authHeader) {
-    try {
-      const { createClient } = await import('@supabase/supabase-js');
-      const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
-      const { data } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
-      if (data.user?.id) userId = data.user.id;
-    } catch { /* ignore */ }
-  }
-
-  const prefix = `${userId}:`;
-  const projects: PlumbingProject[] = [];
-  for (const [key, val] of plumbingStore) {
-    if (key.startsWith(prefix)) projects.push(val);
-  }
-  projects.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  const userId   = await getPlumbingUserId(req.headers.authorization);
+  const projects = await plumbingStore.list(userId);
   return res.json({ projects });
 });
 
-// PATCH /api/plumbing/:id — manual edit (qo'lda element qo'shish/o'chirish/ko'chirish)
+// DELETE /api/plumbing/:id
+app.delete('/api/plumbing/:id', async (req, res) => {
+  const userId = await getPlumbingUserId(req.headers.authorization);
+  await plumbingStore.delete(userId, req.params.id);
+  return res.json({ ok: true });
+});
+
+// PATCH /api/plumbing/:id — manual edit
 app.patch('/api/plumbing/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { action, payload } = req.body;
-    // action: 'add_fixture' | 'remove_fixture' | 'move_fixture' | 'update_name' | 'update_layer'
 
-    const authHeader = req.headers.authorization;
-    let userId = 'anon';
-    if (authHeader) {
-      try {
-        const { createClient } = await import('@supabase/supabase-js');
-        const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
-        const { data } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
-        if (data.user?.id) userId = data.user.id;
-      } catch { /* ignore */ }
-    }
-
-    const storeKey = `${userId}:${id}`;
-    let project = plumbingStore.get(storeKey);
+    const userId  = await getPlumbingUserId(req.headers.authorization);
+    let project   = await plumbingStore.get(userId, id);
     if (!project) return res.status(404).json({ error: 'Loyiha topilmadi' });
 
     if (action === 'add_fixture') {
@@ -1149,7 +1127,7 @@ app.patch('/api/plumbing/:id', async (req, res) => {
       project = { ...project, activeView: payload.view, activeFloor: payload.floor ?? project.activeFloor };
     }
 
-    plumbingStore.set(storeKey, project);
+    await plumbingStore.save(userId, project);
     return res.json({ project });
   } catch (err) {
     console.error('[PLUMBING] patch error:', err);
@@ -1164,19 +1142,8 @@ app.post('/api/plumbing/:id/ai-edit', requireCredits('plumbing_edit'), async (re
     const { message } = req.body;
     if (!message) return res.status(400).json({ error: 'message required' });
 
-    const authHeader = req.headers.authorization;
-    let userId = 'anon';
-    if (authHeader) {
-      try {
-        const { createClient } = await import('@supabase/supabase-js');
-        const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
-        const { data } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
-        if (data.user?.id) userId = data.user.id;
-      } catch { /* ignore */ }
-    }
-
-    const storeKey = `${userId}:${id}`;
-    const project = plumbingStore.get(storeKey);
+    const userId  = await getPlumbingUserId(req.headers.authorization);
+    const project = await plumbingStore.get(userId, id);
     if (!project) return res.status(404).json({ error: 'Loyiha topilmadi' });
 
     // Mavjud spec reconstruct
@@ -1202,7 +1169,7 @@ app.post('/api/plumbing/:id/ai-edit', requireCredits('plumbing_edit'), async (re
     updatedProject.description = project.description;
     updatedProject.createdAt = project.createdAt;
 
-    plumbingStore.set(storeKey, updatedProject);
+    await plumbingStore.save(userId, updatedProject);
     console.log(`[PLUMBING] ai-edit OK: "${message.slice(0, 40)}"`);
     return res.json({ project: updatedProject });
   } catch (err) {
@@ -1217,19 +1184,8 @@ app.post('/api/plumbing/:id/regenerate', requireCredits('plumbing_generate'), as
     const { id } = req.params;
     const { spec } = req.body;
 
-    const authHeader = req.headers.authorization;
-    let userId = 'anon';
-    if (authHeader) {
-      try {
-        const { createClient } = await import('@supabase/supabase-js');
-        const sb = createClient(process.env.SUPABASE_URL!, process.env.SUPABASE_SERVICE_KEY!);
-        const { data } = await sb.auth.getUser(authHeader.replace('Bearer ', ''));
-        if (data.user?.id) userId = data.user.id;
-      } catch { /* ignore */ }
-    }
-
-    const storeKey = `${userId}:${id}`;
-    const existing = plumbingStore.get(storeKey);
+    const userId   = await getPlumbingUserId(req.headers.authorization);
+    const existing = await plumbingStore.get(userId, id);
     if (!existing && !spec) return res.status(404).json({ error: 'Loyiha topilmadi' });
 
     const finalSpec: PlumbingProjectSpec = spec ?? {
@@ -1245,7 +1201,7 @@ app.post('/api/plumbing/:id/regenerate', requireCredits('plumbing_generate'), as
 
     const project = plumbingProjectEngine.generate(finalSpec, id);
     if (existing) { project.name = existing.name; project.createdAt = existing.createdAt; }
-    plumbingStore.set(storeKey, project);
+    await plumbingStore.save(userId, project);
     return res.json({ project });
   } catch (err) {
     console.error('[PLUMBING] regenerate error:', err);
