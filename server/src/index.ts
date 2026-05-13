@@ -1243,16 +1243,17 @@ app.post('/api/plumbing/:id/calc-diameters', async (req, res) => {
     let project   = await plumbingStore.get(userId, id);
     if (!project) return res.status(404).json({ error: 'Loyiha topilmadi' });
 
-    const { calcProjectDiameters } = await import('./engine/SNiPCalculator');
-    const result = calcProjectDiameters(
-      project.fixtures as Parameters<typeof calcProjectDiameters>[0],
+    const snip = await import('./engine/SNiPCalculator');
+    const result = snip.calcProjectDiameters(
+      project.fixtures as Parameters<typeof snip.calcProjectDiameters>[0],
       project.pipes,
       project.floorCount,
     );
+    type PipeRes = { pipeId: string; newDiamMm: number };
 
     // Diametrlarni yangilash
     if (result.pipes.length > 0) {
-      const patchMap = Object.fromEntries(result.pipes.map(p => [p.pipeId, p.newDiamMm]));
+      const patchMap = Object.fromEntries(result.pipes.map((p: PipeRes) => [p.pipeId, p.newDiamMm]));
       project = {
         ...project,
         pipes: project.pipes.map(p => patchMap[p.id] ? { ...p, diamMm: patchMap[p.id] } : p),
