@@ -59,6 +59,9 @@ export interface PlumbingRoom {
   length: number;
   height: number;
   fixtureIds: string[];
+  /** Ixtiyoriy polygon shakl — position ga nisbiy nuqtalar (m).
+   *  Yo'q bo'lsa oddiy to'rtburchak (0,0)→(width,length) */
+  shape?: Vec2[];
 }
 
 export interface PlumbingRiser {
@@ -78,6 +81,18 @@ export interface PlumbingRiser {
   }>;
 }
 
+export type WallSide = 'north' | 'south' | 'east' | 'west';
+
+export interface PlumbingOpening {
+  id: string;
+  roomId: string;
+  side: WallSide;       // qaysi devorda
+  offset: number;       // devor boshidan (m)
+  width: number;        // ochilma kengligi (m)
+  type: 'door' | 'window';
+  swingIn?: boolean;    // eshik ichkariga ochilishmi (faqat door)
+}
+
 export interface PlumbingEquipment {
   id: string;
   type: 'boiler' | 'pump_cold' | 'pump_circ' | 'filter' | 'manifold_cold' | 'manifold_hot' | 'water_meter';
@@ -95,6 +110,13 @@ export interface PlumbingLayer {
   color: string;
 }
 
+export interface LabelOverride {
+  dx: number;        // foydalanuvchi surgan offset (px, scale=1 da)
+  dy: number;
+  fontSize?: number; // override font o'lchami
+  hidden?: boolean;
+}
+
 export interface PlumbingProject {
   id: string;
   name: string;
@@ -110,9 +132,12 @@ export interface PlumbingProject {
   pipes: PlumbingPipeSegment[];
   risers: PlumbingRiser[];
   equipment: PlumbingEquipment[];
+  openings?: PlumbingOpening[];
   activeView: ViewType;
   activeFloor: number;
   layers: PlumbingLayer[];
+  /** Label override lar: key = "fixture:{id}" | "room:{id}" */
+  labelOverrides?: Record<string, LabelOverride>;
   stats: {
     totalFixtures: number;
     totalPipeM: number;

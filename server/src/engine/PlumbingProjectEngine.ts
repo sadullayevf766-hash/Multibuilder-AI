@@ -74,6 +74,8 @@ export interface PlumbingRoom {
   length: number;
   height: number;             // qavat balandligi (odatda 2.8m)
   fixtureIds: string[];
+  /** Ixtiyoriy polygon shakl — position ga nisbiy nuqtalar (m). */
+  shape?: Vec2[];
 }
 
 export interface PlumbingRiser {
@@ -92,6 +94,18 @@ export interface PlumbingRiser {
     diamMm: number;
     label: string;
   }>;
+}
+
+export type WallSide = 'north' | 'south' | 'east' | 'west';
+
+export interface PlumbingOpening {
+  id: string;
+  roomId: string;
+  side: WallSide;
+  offset: number;
+  width: number;
+  type: 'door' | 'window';
+  swingIn?: boolean;
 }
 
 export interface PlumbingEquipment {
@@ -130,6 +144,7 @@ export interface PlumbingProject {
   pipes: PlumbingPipeSegment[];
   risers: PlumbingRiser[];
   equipment: PlumbingEquipment[];
+  openings?: PlumbingOpening[];
 
   // Ko'rinish holati (client saqlaydi)
   activeView: ViewType;
@@ -150,6 +165,7 @@ export interface PlumbingProject {
   };
 
   notes: string[];
+  labelOverrides?: Record<string, { dx: number; dy: number; fontSize?: number; hidden?: boolean }>;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -342,8 +358,6 @@ function layoutRooms(spec: PlumbingProjectSpec): PlumbingRoom[] {
 let idCounter = 0;
 function uid(prefix: string) { return `${prefix}-${++idCounter}`; }
 
-type WallSide = 'north' | 'south' | 'east' | 'west';
-
 // Devorga joylashtirilganda fixture o'lchamlari:
 // north/south → along=w (kengligi), into=d (chuqurligi)
 // east/west   → along=d, into=w  (90° burilgan)
@@ -530,9 +544,9 @@ function placeFixtures(rooms: PlumbingRoom[], spec: PlumbingProjectSpec, floorHe
         dimensions: { w: meta.w, d: meta.d, h: meta.h },
         floor: room.floor,
         roomId: room.id,
-        coldIn:   meta.coldOffset  ? addVec3(pos, meta.coldOffset)  : null,
-        hotIn:    meta.hotOffset   ? addVec3(pos, meta.hotOffset)   : null,
-        drainOut: meta.drainOffset ? addVec3(pos, meta.drainOffset) : null,
+        coldIn:   meta.coldOffset  ? addVec3Rotated(pos, meta.coldOffset,  rotation) : null,
+        hotIn:    meta.hotOffset   ? addVec3Rotated(pos, meta.hotOffset,   rotation) : null,
+        drainOut: meta.drainOffset ? addVec3Rotated(pos, meta.drainOffset, rotation) : null,
         drainDiamMm: meta.drainDiamMm,
         branchDiamMm: meta.branchDiamMm,
         isManual: false,
@@ -548,6 +562,20 @@ function placeFixtures(rooms: PlumbingRoom[], spec: PlumbingProjectSpec, floorHe
 
 function addVec3(base: Vec3, offset: Vec3): Vec3 {
   return { x: base.x + offset.x, y: base.y + offset.y, z: base.z + offset.z };
+}
+
+// Offset vektorini rotation gradusga moslashtirish (faqat x/y, z o'zgarmaydi)
+function rotateOffset(offset: Vec3, rotationDeg: number): Vec3 {
+  switch (((rotationDeg % 360) + 360) % 360) {
+    case 90:  return { x: -offset.y, y:  offset.x, z: offset.z };
+    case 180: return { x: -offset.x, y: -offset.y, z: offset.z };
+    case 270: return { x:  offset.y, y: -offset.x, z: offset.z };
+    default:  return offset;
+  }
+}
+
+export function addVec3Rotated(base: Vec3, offset: Vec3, rotationDeg: number): Vec3 {
+  return addVec3(base, rotateOffset(offset, rotationDeg));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -581,7 +609,7 @@ function generateRisers(rooms: PlumbingRoom[], fixtures: PlumbingFixture[], spec
     // В1 — sovuq
     risers.push({
       id: uid('riser'),
-      tag: `В1-${riserIdx}`,
+      tag: `V1-${riserIdx}`,
       type: 'cold',
       diamMm: mainDiam,
       x: centerX - 0.12,
@@ -591,14 +619,14 @@ function generateRisers(rooms: PlumbingRoom[], fixtures: PlumbingFixture[], spec
       segments: Array.from({ length: spec.floorCount }, (_, i) => ({
         fromFloor: i, toFloor: i + 1,
         diamMm: i < spec.floorCount - 2 ? mainDiam : 20,
-        label: `В1-${riserIdx}-ø${i < spec.floorCount - 2 ? mainDiam : 20}`,
+        label: `V1-${riserIdx}`,
       })),
     });
 
     // Т3 — issiq
     risers.push({
       id: uid('riser'),
-      tag: `Т3-${riserIdx}`,
+      tag: `T3-${riserIdx}`,
       type: 'hot',
       diamMm: mainDiam,
       x: centerX,
@@ -608,14 +636,14 @@ function generateRisers(rooms: PlumbingRoom[], fixtures: PlumbingFixture[], spec
       segments: Array.from({ length: spec.floorCount }, (_, i) => ({
         fromFloor: i, toFloor: i + 1,
         diamMm: i < spec.floorCount - 2 ? mainDiam : 20,
-        label: `Т3-${riserIdx}-ø${i < spec.floorCount - 2 ? mainDiam : 20}`,
+        label: `T3-${riserIdx}`,
       })),
     });
 
     // К1 — kanalizatsiya
     risers.push({
       id: uid('riser'),
-      tag: `К1-${riserIdx}`,
+      tag: `K1-${riserIdx}`,
       type: 'drain',
       diamMm: 110,
       x: centerX + 0.12,
@@ -625,7 +653,7 @@ function generateRisers(rooms: PlumbingRoom[], fixtures: PlumbingFixture[], spec
       segments: Array.from({ length: spec.floorCount }, (_, i) => ({
         fromFloor: i, toFloor: i + 1,
         diamMm: 110,
-        label: `К1-${riserIdx}-ø110`,
+        label: `K1-${riserIdx}`,
       })),
     });
 
@@ -663,89 +691,200 @@ function generatePipes(
   spec: PlumbingProjectSpec,
 ): PlumbingPipeSegment[] {
   const pipes: PlumbingPipeSegment[] = [];
-  const floorH = spec.floorHeight || 2.8;
+  const floorH   = spec.floorHeight || 2.8;
+  const WALL_M   = 0.125;  // devor qalinligi m
+  const MAIN_Y   = WALL_M / 2; // shimoliy devorning o'rtasi (0.0625m)
+  const C_OFF    = -0.025; // cold pipe X offset (parallel ajratish)
+  const H_OFF    =  0.025; // hot  pipe X offset
 
-  // Har bir fixture uchun stoyakka ulash
-  for (const fix of fixtures) {
-    const riserGroup = risers.filter(r => {
-      // Eng yaqin stoyakni topish
-      const dx = r.x - fix.position.x;
-      const dy = r.y - fix.position.y;
-      return Math.sqrt(dx * dx + dy * dy) < (spec.buildingWidth || 12);
-    });
+  // ── Qavatlar bo'yicha qayta ishlash ────────────────────────────────────────
+  const floors = [...new Set(fixtures.map(f => f.floor))].sort();
 
-    const coldRiser = riserGroup.find(r => r.type === 'cold');
-    const hotRiser  = riserGroup.find(r => r.type === 'hot');
-    const drainRiser = riserGroup.find(r => r.type === 'drain');
+  for (const floor of floors) {
+    const baseZ   = (floor - 1) * floorH;
+    const mainZ   = baseZ + 0.30;   // magistral balandligi (poldan 30sm)
+    const drainZ  = baseZ + 0.02;   // kanalizatsiya (poldan 2sm)
 
-    const baseZ = (fix.floor - 1) * floorH;
-    const branchZ = baseZ + 0.30; // poldan 30cm yukori branch
+    const floorFix  = fixtures.filter(f => f.floor === floor);
+    const floorRooms = rooms.filter(r => r.floor === floor);
 
-    // Sovuq suv branch
-    if (fix.coldIn && coldRiser) {
-      // Vertikal pastga (stoyakdan)
-      pipes.push({
-        id: uid('pipe'),
-        type: 'cold', material: 'ppr',
-        diamMm: fix.branchDiamMm,
-        from: { x: coldRiser.x, y: coldRiser.y, z: branchZ },
-        to:   { x: fix.coldIn.x, y: fix.coldIn.y, z: branchZ },
-        floor: fix.floor, isRiser: false, isMain: false,
-        label: `В1 ø${fix.branchDiamMm}`,
+    // Eng yaqin stoyaklarni topish (bu qavatga xizmat qiluvchi)
+    const coldRiser  = risers.find(r => r.type === 'cold');
+    const hotRiser   = risers.find(r => r.type === 'hot');
+    const drainRiser = risers.find(r => r.type === 'drain');
+
+    const allColdRisers  = risers.filter(r => r.type === 'cold');
+    const allHotRisers   = risers.filter(r => r.type === 'hot');
+    const allDrainRisers = risers.filter(r => r.type === 'drain');
+
+    if (!allColdRisers.length && !allHotRisers.length && !allDrainRisers.length) continue;
+
+    // Eng yaqin stoyakni topish (masofa bo'yicha)
+    function nearestRiser<T extends { x: number; y: number }>(arr: T[], fx: number, fy: number): T | null {
+      if (!arr.length) return null;
+      return arr.reduce((best, r) => {
+        const d = Math.hypot(r.x - fx, r.y - fy);
+        const bd = Math.hypot(best.x - fx, best.y - fy);
+        return d < bd ? r : best;
       });
-      // Vertikal ko'tarilish fixturegacha
-      if (Math.abs(fix.coldIn.z - branchZ) > 0.05) {
-        pipes.push({
-          id: uid('pipe'),
-          type: 'cold', material: 'ppr',
-          diamMm: fix.branchDiamMm,
-          from: { x: fix.coldIn.x, y: fix.coldIn.y, z: branchZ },
-          to:   fix.coldIn,
-          floor: fix.floor, isRiser: false, isMain: false,
-        });
+    }
+
+    // Har fixture uchun stoyak aniqlab shox chizish
+    // Magistral: har stoyak uchun bitta — stoyak ga ulangan xonalar bo'ylab
+    // Stoyak guruhlash: fixture → yaqin stoyak → shu stoyak xonalari
+
+    // 1. Stoyak → fixture guruhi xaritalash
+    const coldStoyakFixes = new Map<string, typeof floorFix>();
+    const hotStoyakFixes  = new Map<string, typeof floorFix>();
+    const drainStoyakFixes = new Map<string, typeof floorFix>();
+
+    for (const fix of floorFix) {
+      if (fix.coldIn) {
+        const r = nearestRiser(allColdRisers, fix.position.x, fix.position.y);
+        if (r) { if (!coldStoyakFixes.has(r.id)) coldStoyakFixes.set(r.id, []); coldStoyakFixes.get(r.id)!.push(fix); }
+      }
+      if (fix.hotIn) {
+        const r = nearestRiser(allHotRisers, fix.position.x, fix.position.y);
+        if (r) { if (!hotStoyakFixes.has(r.id)) hotStoyakFixes.set(r.id, []); hotStoyakFixes.get(r.id)!.push(fix); }
+      }
+      if (fix.drainOut) {
+        const r = nearestRiser(allDrainRisers, fix.position.x, fix.position.y);
+        if (r) { if (!drainStoyakFixes.has(r.id)) drainStoyakFixes.set(r.id, []); drainStoyakFixes.get(r.id)!.push(fix); }
       }
     }
 
-    // Issiq suv branch
-    if (fix.hotIn && hotRiser) {
-      pipes.push({
-        id: uid('pipe'),
-        type: 'hot', material: 'ppr',
-        diamMm: fix.branchDiamMm,
-        from: { x: hotRiser.x, y: hotRiser.y, z: branchZ },
-        to:   { x: fix.hotIn.x, y: fix.hotIn.y, z: branchZ },
-        floor: fix.floor, isRiser: false, isMain: false,
-        label: `Т3 ø${fix.branchDiamMm}`,
-      });
-      if (Math.abs(fix.hotIn.z - branchZ) > 0.05) {
-        pipes.push({
-          id: uid('pipe'),
-          type: 'hot', material: 'ppr',
-          diamMm: fix.branchDiamMm,
-          from: { x: fix.hotIn.x, y: fix.hotIn.y, z: branchZ },
-          to:   fix.hotIn,
-          floor: fix.floor, isRiser: false, isMain: false,
-        });
+    // 2. Har stoyak uchun magistral + shoxlar
+    for (const [riserId, coldFixes] of coldStoyakFixes) {
+      const cr = allColdRisers.find(r => r.id === riserId)!;
+      // Bu stoyak xonalari
+      const stoyakRooms = floorRooms.filter(room =>
+        coldFixes.some(f => f.roomId === room.id));
+      if (!stoyakRooms.length) continue;
+      const minY = Math.min(...stoyakRooms.map(r => r.position.y));
+      const maxX = Math.max(...stoyakRooms.map(r => r.position.x + r.width));
+      const mainY = minY + MAIN_Y;
+
+      if (Math.abs(cr.y - mainY) > 0.02) {
+        pipes.push({ id: uid('pipe'), type: 'cold', material: 'ppr',
+          diamMm: cr.diamMm,
+          from: { x: cr.x + C_OFF, y: cr.y,    z: mainZ },
+          to:   { x: cr.x + C_OFF, y: mainY,   z: mainZ },
+          floor, isRiser: false, isMain: true });
+      }
+      const mX1 = cr.x + C_OFF, mX2 = maxX - WALL_M + C_OFF;
+      if (mX2 > mX1 + 0.05) {
+        pipes.push({ id: uid('pipe'), type: 'cold', material: 'ppr',
+          diamMm: cr.diamMm,
+          from: { x: mX1, y: mainY, z: mainZ },
+          to:   { x: mX2, y: mainY, z: mainZ },
+          floor, isRiser: false, isMain: true,
+          label: `DN${cr.diamMm}` });
+      }
+      for (const fix of coldFixes) {
+        if (!fix.coldIn) continue;
+        const tx = fix.coldIn.x, ty = fix.coldIn.y;
+        if (Math.abs(mainY - ty) > 0.02) {
+          pipes.push({ id: uid('pipe'), type: 'cold', material: 'ppr',
+            diamMm: fix.branchDiamMm,
+            from: { x: tx, y: mainY, z: mainZ },
+            to:   { x: tx, y: ty,    z: mainZ },
+            floor, isRiser: false, isMain: false,
+            label: `DN${fix.branchDiamMm}` });
+        }
+        if (Math.abs(fix.coldIn.z - mainZ) > 0.05) {
+          pipes.push({ id: uid('pipe'), type: 'cold', material: 'ppr',
+            diamMm: fix.branchDiamMm,
+            from: { x: tx, y: ty, z: mainZ }, to: fix.coldIn,
+            floor, isRiser: false, isMain: false });
+        }
       }
     }
 
-    // Kanalizatsiya branch
-    if (fix.drainOut && drainRiser) {
-      const drainZ = baseZ + 0.02; // poldan 2cm — kanalizatsiya pol darajasida
-      pipes.push({
-        id: uid('pipe'),
-        type: 'drain', material: 'pvc',
-        diamMm: fix.drainDiamMm,
-        from: fix.drainOut,
-        to:   { x: drainRiser.x, y: drainRiser.y, z: drainZ },
-        floor: fix.floor, isRiser: false, isMain: false,
-        label: `К1 ø${fix.drainDiamMm}`,
-        slope: fix.drainDiamMm === 110 ? 2 : 3,
-      });
+    for (const [riserId, hotFixes] of hotStoyakFixes) {
+      const hr = allHotRisers.find(r => r.id === riserId)!;
+      const stoyakRooms = floorRooms.filter(room =>
+        hotFixes.some(f => f.roomId === room.id));
+      if (!stoyakRooms.length) continue;
+      const minY = Math.min(...stoyakRooms.map(r => r.position.y));
+      const maxX = Math.max(...stoyakRooms.map(r => r.position.x + r.width));
+      const mainY = minY + MAIN_Y;
+
+      if (Math.abs(hr.y - mainY) > 0.02) {
+        pipes.push({ id: uid('pipe'), type: 'hot', material: 'ppr',
+          diamMm: hr.diamMm,
+          from: { x: hr.x + H_OFF, y: hr.y,   z: mainZ },
+          to:   { x: hr.x + H_OFF, y: mainY,  z: mainZ },
+          floor, isRiser: false, isMain: true });
+      }
+      const mX1 = hr.x + H_OFF, mX2 = maxX - WALL_M + H_OFF;
+      if (mX2 > mX1 + 0.05) {
+        pipes.push({ id: uid('pipe'), type: 'hot', material: 'ppr',
+          diamMm: hr.diamMm,
+          from: { x: mX1, y: mainY, z: mainZ },
+          to:   { x: mX2, y: mainY, z: mainZ },
+          floor, isRiser: false, isMain: true,
+          label: `DN${hr.diamMm}` });
+      }
+      for (const fix of hotFixes) {
+        if (!fix.hotIn) continue;
+        const tx = fix.hotIn.x, ty = fix.hotIn.y;
+        if (Math.abs(mainY - ty) > 0.02) {
+          pipes.push({ id: uid('pipe'), type: 'hot', material: 'ppr',
+            diamMm: fix.branchDiamMm,
+            from: { x: tx, y: mainY, z: mainZ },
+            to:   { x: tx, y: ty,    z: mainZ },
+            floor, isRiser: false, isMain: false,
+            label: `DN${fix.branchDiamMm}` });
+        }
+        if (Math.abs(fix.hotIn.z - mainZ) > 0.05) {
+          pipes.push({ id: uid('pipe'), type: 'hot', material: 'ppr',
+            diamMm: fix.branchDiamMm,
+            from: { x: tx, y: ty, z: mainZ }, to: fix.hotIn,
+            floor, isRiser: false, isMain: false });
+        }
+      }
+    }
+
+    for (const [riserId, drainFixes] of drainStoyakFixes) {
+      const dr = allDrainRisers.find(r => r.id === riserId)!;
+      const stoyakRooms = floorRooms.filter(room =>
+        drainFixes.some(f => f.roomId === room.id));
+      if (!stoyakRooms.length) continue;
+      const maxY = Math.max(...stoyakRooms.map(r => r.position.y + r.length));
+      const drainY = maxY - MAIN_Y;
+      const allDX = drainFixes.map(f => f.drainOut!.x);
+      const dX1 = Math.min(...allDX, dr.x), dX2 = Math.max(...allDX, dr.x);
+      if (dX2 > dX1 + 0.05) {
+        pipes.push({ id: uid('pipe'), type: 'drain', material: 'pvc',
+          diamMm: 110,
+          from: { x: dX1, y: drainY, z: drainZ },
+          to:   { x: dX2, y: drainY, z: drainZ },
+          floor, isRiser: false, isMain: true,
+          label: 'DN110', slope: 2 });
+      }
+      if (Math.abs(dr.y - drainY) > 0.02) {
+        pipes.push({ id: uid('pipe'), type: 'drain', material: 'pvc',
+          diamMm: 110,
+          from: { x: dr.x, y: drainY,  z: drainZ },
+          to:   { x: dr.x, y: dr.y,    z: drainZ },
+          floor, isRiser: false, isMain: true, slope: 2 });
+      }
+      for (const fix of drainFixes) {
+        if (!fix.drainOut) continue;
+        const tx = fix.drainOut.x, ty = fix.drainOut.y;
+        if (Math.abs(ty - drainY) > 0.02) {
+          pipes.push({ id: uid('pipe'), type: 'drain', material: 'pvc',
+            diamMm: fix.drainDiamMm,
+            from: { x: tx, y: ty,     z: drainZ },
+            to:   { x: tx, y: drainY, z: drainZ },
+            floor, isRiser: false, isMain: false,
+            label: `DN${fix.drainDiamMm}`, slope: 3 });
+        }
+      }
     }
   }
 
-  // Stoyaklarni vertikal segment sifatida qo'shish
+  // ── Stoyaklarni vertikal segment sifatida qo'shish ─────────────────────────
   for (const riser of risers) {
     for (const seg of riser.segments) {
       const fromZ = seg.fromFloor * (spec.floorHeight || 2.8);
@@ -763,6 +902,66 @@ function generatePipes(
   }
 
   return pipes;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// OPENING GENERATION (eshiklar va derazalar)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function generateOpenings(rooms: PlumbingRoom[]): PlumbingOpening[] {
+  const openings: PlumbingOpening[] = [];
+  // Qaysi devorda qo'shni xona bor? — eshiklar qo'shni xonalar orasida
+  // Tashqi devorda ham bitta eshik bo'lishi kerak
+
+  // Har xona uchun minimal bitta eshik
+  for (const room of rooms) {
+    const roomOpenings = openings.filter(o => o.roomId === room.id);
+    if (roomOpenings.length > 0) continue; // allaqachon eshigi bor
+
+    // Afzal devor: shimoliy yoki g'arbiy (xona kirishiga mos)
+    // Qo'shni xona bor devoriga eshik qo'yish
+    const neighborSide = findNeighborSide(room, rooms);
+    const doorSide = neighborSide ?? 'north';
+
+    const wallLen = (doorSide === 'north' || doorSide === 'south') ? room.width : room.length;
+    const doorW = Math.min(0.90, wallLen * 0.35); // 90sm yoki devor 35%
+    const doorOffset = Math.max(0.15, (wallLen - doorW) / 2); // markazga yaqin
+
+    openings.push({
+      id: uid('op'),
+      roomId: room.id,
+      side: doorSide,
+      offset: doorOffset,
+      width: doorW,
+      type: 'door',
+      swingIn: true,
+    });
+  }
+
+  return openings;
+}
+
+// Qo'shni xona bor devoini topish
+function findNeighborSide(room: PlumbingRoom, allRooms: PlumbingRoom[]): WallSide | null {
+  const rx1 = room.position.x, ry1 = room.position.y;
+  const rx2 = rx1 + room.width,  ry2 = ry1 + room.length;
+  const TOL = 0.15; // tolerans (m)
+
+  for (const other of allRooms) {
+    if (other.id === room.id || other.floor !== room.floor) continue;
+    const ox1 = other.position.x, oy1 = other.position.y;
+    const ox2 = ox1 + other.width, oy2 = oy1 + other.length;
+
+    // Shimoliy devor — other xona janubida ulashgan
+    if (Math.abs(ry1 - oy2) < TOL && ox1 < rx2 - TOL && ox2 > rx1 + TOL) return 'north';
+    // Janubiy devor — other xona shimolida
+    if (Math.abs(ry2 - oy1) < TOL && ox1 < rx2 - TOL && ox2 > rx1 + TOL) return 'south';
+    // G'arbiy devor — other xona sharqida
+    if (Math.abs(rx1 - ox2) < TOL && oy1 < ry2 - TOL && oy2 > ry1 + TOL) return 'west';
+    // Sharqiy devor — other xona g'arbida
+    if (Math.abs(rx2 - ox1) < TOL && oy1 < ry2 - TOL && oy2 > ry1 + TOL) return 'east';
+  }
+  return null;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -881,6 +1080,7 @@ export class PlumbingProjectEngine {
     const risers    = generateRisers(rooms, fixtures, spec);
     const pipes     = generatePipes(rooms, fixtures, risers, spec);
     const equipment = generateEquipment(spec, fixtures);
+    const openings  = generateOpenings(rooms);
     const stats     = calcStats(fixtures, pipes, risers, equipment);
 
     const now = new Date().toISOString();
@@ -900,6 +1100,7 @@ export class PlumbingProjectEngine {
       pipes,
       risers,
       equipment,
+      openings,
       activeView: 'top',
       activeFloor: 1,
       layers: [
@@ -937,9 +1138,9 @@ export class PlumbingProjectEngine {
       dimensions: { w: meta.w, d: meta.d, h: meta.h },
       floor: room.floor,
       roomId,
-      coldIn:   meta.coldOffset  ? addVec3(pos, meta.coldOffset)  : null,
-      hotIn:    meta.hotOffset   ? addVec3(pos, meta.hotOffset)   : null,
-      drainOut: meta.drainOffset ? addVec3(pos, meta.drainOffset) : null,
+      coldIn:   meta.coldOffset  ? addVec3Rotated(pos, meta.coldOffset,  0) : null,
+      hotIn:    meta.hotOffset   ? addVec3Rotated(pos, meta.hotOffset,   0) : null,
+      drainOut: meta.drainOffset ? addVec3Rotated(pos, meta.drainOffset, 0) : null,
       drainDiamMm: meta.drainDiamMm,
       branchDiamMm: meta.branchDiamMm,
       isManual: true,
@@ -992,9 +1193,9 @@ export class PlumbingProjectEngine {
       return {
         ...f,
         position: newPosition,
-        coldIn:   meta.coldOffset  ? addVec3(newPosition, meta.coldOffset)  : null,
-        hotIn:    meta.hotOffset   ? addVec3(newPosition, meta.hotOffset)   : null,
-        drainOut: meta.drainOffset ? addVec3(newPosition, meta.drainOffset) : null,
+        coldIn:   meta.coldOffset  ? addVec3Rotated(newPosition, meta.coldOffset,  f.rotation) : null,
+        hotIn:    meta.hotOffset   ? addVec3Rotated(newPosition, meta.hotOffset,   f.rotation) : null,
+        drainOut: meta.drainOffset ? addVec3Rotated(newPosition, meta.drainOffset, f.rotation) : null,
         isManual: true,
       };
     });

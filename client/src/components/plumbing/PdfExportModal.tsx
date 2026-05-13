@@ -27,6 +27,7 @@ export default function PdfExportModal({ project, onClose }: Props) {
 
   const [orientation, setOrientation] = useState<'landscape' | 'portrait'>('landscape');
   const [quality, setQuality] = useState(2);
+  const [includeSpec, setIncludeSpec] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(0);
 
@@ -89,7 +90,7 @@ export default function PdfExportModal({ project, onClose }: Props) {
     }
 
     try {
-      await exportPlumbingPDF(project, { pages, orientation, quality }, (cur, total) => {
+      await exportPlumbingPDF(project, { pages, orientation, quality, includeSpec }, (cur, total) => {
         setProgress(Math.round((cur / total) * 100));
       });
     } catch (e) {
@@ -101,7 +102,7 @@ export default function PdfExportModal({ project, onClose }: Props) {
     }
   }, [selected, orientation, quality, project, onClose, floors]);
 
-  const pageCount = selected.size;
+  const pageCount = selected.size + (includeSpec ? 1 : 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
@@ -243,6 +244,30 @@ export default function PdfExportModal({ project, onClose }: Props) {
                   </button>
                 ))}
               </div>
+            </div>
+          </div>
+
+          {/* Spetsifikatsiya */}
+          <div
+            onClick={() => setIncludeSpec(v => !v)}
+            className={`flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer transition-all ${
+              includeSpec
+                ? 'bg-emerald-500/10 border-emerald-500/30'
+                : 'bg-white/3 border-white/10 hover:border-white/20'
+            }`}
+          >
+            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
+              includeSpec ? 'bg-emerald-500 border-emerald-400' : 'border-white/30'
+            }`}>
+              {includeSpec && (
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3">
+                  <polyline points="20,6 9,17 4,12"/>
+                </svg>
+              )}
+            </div>
+            <div>
+              <div className="text-sm font-medium">Spetsifikatsiya sahifasi</div>
+              <div className="text-xs text-white/40">Jihozlar + quvurlar jadvali + statistika (1 sahifa)</div>
             </div>
           </div>
 

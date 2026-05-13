@@ -14,7 +14,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/auth';
 import { supabase } from '../lib/supabase';
 import { apiUrl } from '../lib/api';
-import type { PlumbingProject, ViewType, FixtureType } from '../engine/plumbing-types';
+import type { PlumbingProject, PlumbingRoom, PlumbingOpening, WallSide, ViewType, FixtureType } from '../engine/plumbing-types';
 import { FIXTURE_NAMES } from '../engine/plumbing-types';
 import PlumbingCanvas2D from '../components/plumbing/PlumbingCanvas2D';
 import PdfExportModal from '../components/plumbing/PdfExportModal';
@@ -122,15 +122,15 @@ function ElementLibrary({
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function DimInput({
-  label, value, onChange,
-}: { label: string; value: number; onChange: (v: number) => void }) {
+  label, value, onChange, min = 0.05, max = 30,
+}: { label: string; value: number; onChange: (v: number) => void; min?: number; max?: number }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState('');
 
   const start = () => { setText(value.toFixed(2)); setEditing(true); };
   const commit = () => {
     const v = parseFloat(text.replace(',', '.'));
-    if (!isNaN(v) && v > 0.05 && v < 5) onChange(v);
+    if (!isNaN(v) && v >= min && v <= max) onChange(v);
     setEditing(false);
   };
 
@@ -174,25 +174,480 @@ const MATERIALS: Record<string, string[]> = {
   drain: ['pvc', 'hdpe', 'steel'],
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONTEXT MENU
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export type ContextMenuInfo = {
+  screenX: number; screenY: number;
+  roomId?: string; fixtureId?: string; pipeId?: string;
+  worldPos?: { x: number; y: number };
+};
+
+function ContextMenu({
+  info,
+  project,
+  onClose,
+  onRenameRoom,
+  onChangeRoomType,
+  onResizeRoom,
+  onRemoveRoom,
+  onAddRoom,
+  onRemoveFixture,
+  onRemovePipe,
+  activeFloor,
+}: {
+  info: ContextMenuInfo;
+  project: PlumbingProject;
+  onClose: () => void;
+  onRenameRoom: (id: string, name: string) => void;
+  onChangeRoomType: (id: string, type: string) => void;
+  onResizeRoom: (id: string, dims: { width?: number; length?: number; shape?: Array<{x:number;y:number}>; position?: { x: number; y: number } }) => void;
+  onRemoveRoom: (id: string) => void;
+  onAddRoom: (pos: { x: number; y: number }, floor: number) => void;
+  onRemoveFixture: (id: string) => void;
+  onRemovePipe: (id: string) => void;
+  activeFloor: number;
+}) {
+  const [renamingText, setRenamingText] = useState('');
+  const [showRename, setShowRename] = useState(false);
+  const [showResize, setShowResize] = useState(false);
+  const [showType, setShowType] = useState(false);
+
+  const room    = info.roomId    ? project.rooms.find(r => r.id === info.roomId)       : null;
+  const fixture = info.fixtureId ? project.fixtures.find(f => f.id === info.fixtureId) : null;
+  const pipe    = info.pipeId    ? project.pipes.find(p => p.id === info.pipeId)       : null;
+
+  // Screen chiqib ketmasligi uchun pozitsiya
+  const menuW = 220;
+  const left = Math.min(info.screenX, window.innerWidth - menuW - 8);
+  const top  = Math.min(info.screenY, window.innerHeight - 400);
+
+  // Tashqariga bosish — yopish
+  useEffect(() => {
+    const close = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-ctx-menu]')) onClose();
+    };
+    setTimeout(() => document.addEventListener('mousedown', close), 0);
+    return () => document.removeEventListener('mousedown', close);
+  }, [onClose]);
+
+  const sep = <div className="h-px bg-white/8 my-1" />;
+
+  const MenuItem = ({ icon, label, danger, onClick }: { icon: string; label: string; danger?: boolean; onClick: () => void }) => (
+    <button
+      onClick={() => { onClick(); onClose(); }}
+      className={`w-full flex items-center gap-2.5 px-3 py-2 text-xs text-left rounded-md transition-colors ${
+        danger ? 'hover:bg-red-500/15 text-red-400' : 'hover:bg-white/8 text-white/75'
+      }`}>
+      <span className="w-4 text-center opacity-60">{icon}</span>
+      {label}
+    </button>
+  );
+
+  return (
+    <div
+      data-ctx-menu
+      className="fixed z-50 bg-[#111827] border border-white/10 rounded-xl shadow-2xl py-1.5 overflow-hidden"
+      style={{ left, top, width: menuW }}
+    >
+      {/* ── XONA ─────────────────────────────── */}
+      {room && (
+        <>
+          <div className="px-3 py-1.5 flex items-center gap-2">
+            <div className="text-[9px] text-white/30 uppercase tracking-wider flex-1">Xona</div>
+            <div className="text-xs font-medium text-white/60 truncate">{room.name}</div>
+          </div>
+          {sep}
+
+          {/* Nom o'zgartirish */}
+          {showRename ? (
+            <div className="px-3 pb-2">
+              <input
+                autoFocus
+                value={renamingText}
+                onChange={e => setRenamingText(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') { onRenameRoom(room.id, renamingText.trim() || room.name); onClose(); }
+                  if (e.key === 'Escape') setShowRename(false);
+                }}
+                className="w-full bg-white/5 border border-orange-500/40 rounded px-2 py-1.5 text-xs outline-none text-orange-200"
+                placeholder={room.name}
+              />
+              <button onClick={() => { onRenameRoom(room.id, renamingText.trim() || room.name); onClose(); }}
+                className="mt-1.5 w-full bg-orange-600/80 hover:bg-orange-500 rounded py-1 text-[11px] font-medium transition-colors">
+                Saqlash
+              </button>
+            </div>
+          ) : (
+            <MenuItem icon="✏" label="Nomini o'zgartirish" onClick={() => { setRenamingText(room.name); setShowRename(true); }} />
+          )}
+
+          {/* Xona turi */}
+          {showType ? (
+            <div className="px-3 pb-2">
+              <div className="text-[9px] text-white/30 uppercase mb-1.5">Tur tanlang</div>
+              <div className="grid grid-cols-2 gap-1">
+                {ROOM_TYPE_OPT.map(opt => (
+                  <button key={opt.value}
+                    onClick={() => { onChangeRoomType(room.id, opt.value); onClose(); }}
+                    className={`px-1.5 py-1 rounded text-[10px] transition-colors ${
+                      room.type === opt.value ? 'bg-orange-600 text-white' : 'bg-white/5 text-white/50 hover:bg-white/10'
+                    }`}>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <MenuItem icon="◈" label={`Tur: ${ROOM_TYPE_OPT.find(o => o.value === room.type)?.label ?? room.type}`}
+              onClick={() => setShowType(true)} />
+          )}
+
+          {/* O'lcham */}
+          {showResize ? (
+            <div className="px-3 pb-2">
+              <div className="text-[9px] text-white/30 uppercase mb-1.5">O'lcham (metr)</div>
+              <div className="grid grid-cols-2 gap-1.5">
+                <RoomDimField label="Kenglik" value={room.width} min={0.5} max={30}
+                  onCommit={v => onResizeRoom(room.id, { width: v })} />
+                <RoomDimField label="Uzunlik" value={room.length} min={0.5} max={30}
+                  onCommit={v => onResizeRoom(room.id, { length: v })} />
+              </div>
+            </div>
+          ) : (
+            <MenuItem icon="⇔" label={`O'lcham: ${room.width.toFixed(1)}×${room.length.toFixed(1)} m`}
+              onClick={() => setShowResize(true)} />
+          )}
+
+          <MenuItem icon="↕" label={`Maydoni: ${(room.width * room.length).toFixed(1)} m²`} onClick={() => {}} />
+
+          {sep}
+          <MenuItem icon="✕" label="Xonani o'chirish" danger onClick={() => { onRemoveRoom(room.id); }} />
+        </>
+      )}
+
+      {/* ── JIHOZ ─────────────────────────────── */}
+      {fixture && !room && (
+        <>
+          <div className="px-3 py-1.5">
+            <div className="text-[9px] text-white/30 uppercase tracking-wider">Jihoz</div>
+            <div className="text-xs font-medium text-white/70 mt-0.5">{fixture.nameUz}</div>
+          </div>
+          {sep}
+          <MenuItem icon="✕" label="Jihozni o'chirish" danger onClick={() => onRemoveFixture(fixture.id)} />
+        </>
+      )}
+
+      {/* ── TRUBA ─────────────────────────────── */}
+      {pipe && !room && !fixture && (
+        <>
+          <div className="px-3 py-1.5">
+            <div className="text-[9px] text-white/30 uppercase tracking-wider">Truba</div>
+            <div className="text-xs font-medium text-white/70 mt-0.5">{pipe.type} ø{pipe.diamMm}</div>
+          </div>
+          {sep}
+          <MenuItem icon="✕" label="Trubani o'chirish" danger onClick={() => onRemovePipe(pipe.id)} />
+        </>
+      )}
+
+      {/* ── BO'SH JOY ─────────────────────────── */}
+      {!room && !fixture && !pipe && info.worldPos && (
+        <>
+          <div className="px-3 py-1.5">
+            <div className="text-[9px] text-white/30 uppercase tracking-wider">Bo'sh joy</div>
+          </div>
+          {sep}
+          <MenuItem icon="+" label="Bu yerga yangi xona" onClick={() => {
+            onAddRoom(info.worldPos!, activeFloor);
+          }} />
+        </>
+      )}
+    </div>
+  );
+}
+
+function RoomDimField({ label, value, min, max, onCommit }: {
+  label: string; value: number; min: number; max: number; onCommit: (v: number) => void;
+}) {
+  const [text, setText] = useState(value.toFixed(1));
+  return (
+    <div>
+      <div className="text-[9px] text-white/30 mb-0.5">{label}</div>
+      <input
+        value={text}
+        onChange={e => setText(e.target.value)}
+        onBlur={() => { const v = parseFloat(text); if (!isNaN(v) && v >= min && v <= max) onCommit(v); }}
+        onKeyDown={e => { if (e.key === 'Enter') { const v = parseFloat(text); if (!isNaN(v) && v >= min && v <= max) onCommit(v); } }}
+        className="w-full bg-white/5 border border-white/10 rounded px-1.5 py-1 text-xs outline-none focus:border-orange-500/50 text-white/80"
+      />
+    </div>
+  );
+}
+
+const ROOM_TYPE_OPT: Array<{ value: PlumbingRoom['type']; label: string }> = [
+  { value: 'bathroom',  label: 'Hammom' },
+  { value: 'kitchen',   label: 'Oshxona' },
+  { value: 'laundry',   label: 'Yuvish' },
+  { value: 'toilet',    label: 'Hojatxona' },
+  { value: 'utility',   label: 'Xizmat' },
+  { value: 'other',     label: 'Boshqa' },
+];
+
+const ROOM_TYPE_OPTIONS: Array<{ value: PlumbingRoom['type']; label: string }> = [
+  { value: 'bathroom',  label: 'Hammom' },
+  { value: 'kitchen',   label: 'Oshxona' },
+  { value: 'laundry',   label: 'Yuvish xona' },
+  { value: 'toilet',    label: 'Hojatxona' },
+  { value: 'utility',   label: 'Xizmat xona' },
+  { value: 'other',     label: 'Boshqa' },
+];
+
+function RoomPanel({
+  room,
+  openings,
+  onRename,
+  onChangeType,
+  onResize,
+  onRemove,
+  onAddOpening,
+  onRemoveOpening,
+}: {
+  room: PlumbingRoom;
+  openings: PlumbingOpening[];
+  onRename: (name: string) => void;
+  onChangeType: (type: string) => void;
+  onResize: (dims: { width?: number; length?: number; shape?: Array<{x:number;y:number}> }) => void;
+  onRemove: () => void;
+  onAddOpening: (o: PlumbingOpening) => void;
+  onRemoveOpening: (id: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState('');
+
+  const startEdit = () => { setText(room.name); setEditing(true); };
+  const commit = () => {
+    const v = text.trim();
+    if (v && v !== room.name) onRename(v);
+    setEditing(false);
+  };
+
+  return (
+    <div className="w-56 flex-shrink-0 border-l border-white/5 bg-[#0a0a16] flex flex-col">
+      <div className="px-3 py-3 border-b border-white/5 flex items-center justify-between">
+        <div className="text-xs font-semibold text-white/40 uppercase tracking-wider">Xona</div>
+        <button onClick={onRemove} className="text-red-400/60 hover:text-red-400 transition-colors text-xs">
+          O'chir
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto p-3 space-y-4">
+        {/* Nom */}
+        <div className="space-y-1.5">
+          <div className="text-xs text-white/30 uppercase tracking-wider">Nomi</div>
+          {editing ? (
+            <input
+              autoFocus
+              value={text}
+              onChange={e => setText(e.target.value)}
+              onBlur={commit}
+              onKeyDown={e => {
+                if (e.key === 'Enter') commit();
+                if (e.key === 'Escape') setEditing(false);
+              }}
+              className="w-full bg-white/5 border border-orange-500/50 rounded px-2 py-1.5 text-sm outline-none text-orange-300"
+            />
+          ) : (
+            <div
+              onClick={startEdit}
+              className="flex items-center justify-between bg-white/5 hover:bg-white/10 rounded px-2 py-1.5 cursor-text transition-colors group"
+            >
+              <span className="text-sm text-white/80">{room.name}</span>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                className="text-white/20 group-hover:text-orange-400 flex-shrink-0">
+                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4z"/>
+              </svg>
+            </div>
+          )}
+        </div>
+
+        {/* Tur */}
+        <div className="space-y-1.5">
+          <div className="text-xs text-white/30 uppercase tracking-wider">Xona turi</div>
+          <div className="grid grid-cols-2 gap-1">
+            {ROOM_TYPE_OPTIONS.map(opt => (
+              <button key={opt.value}
+                onClick={() => onChangeType(opt.value)}
+                className={`px-1.5 py-1 rounded text-[10px] transition-colors ${
+                  room.type === opt.value
+                    ? 'bg-orange-600 text-white'
+                    : 'bg-white/5 text-white/40 hover:bg-white/10'
+                }`}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* O'lchamlar */}
+        <div className="space-y-1.5">
+          <div className="text-xs text-white/30 uppercase tracking-wider">O'lchamlar</div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <DimInput label="Kenglik" value={room.width} min={0.5} max={30}
+              onChange={v => onResize({ width: v })} />
+            <DimInput label="Uzunlik" value={room.length} min={0.5} max={30}
+              onChange={v => onResize({ length: v })} />
+          </div>
+          <div className="text-[9px] text-white/20 px-0.5">Bosib o'zgartiring yoki corner ni torting</div>
+        </div>
+
+        {/* Info */}
+        <div className="space-y-1.5">
+          {[
+            { label: 'Maydoni',    val: `${(room.width * room.length).toFixed(2)} m²` },
+            { label: 'Balandlik',  val: `${room.height.toFixed(2)} m` },
+            { label: 'Qavat',      val: `${room.floor}-qavat` },
+            { label: 'Jihozlar',   val: `${room.fixtureIds.length} ta` },
+          ].map(s => (
+            <div key={s.label} className="flex justify-between text-xs">
+              <span className="text-white/40">{s.label}</span>
+              <span className="text-white/70 font-mono">{s.val}</span>
+            </div>
+          ))}
+        </div>
+
+        {/* Shakl */}
+        <div className="space-y-1.5">
+          <div className="text-xs text-white/30 uppercase tracking-wider">Shakl</div>
+          <div className="grid grid-cols-2 gap-1">
+            <button
+              onClick={() => onResize({ shape: undefined })}
+              className={`px-1.5 py-1.5 rounded text-[10px] transition-colors ${
+                !room.shape ? 'bg-blue-600 text-white' : 'bg-white/5 text-white/40 hover:bg-white/10'
+              }`}>
+              ▭ To'rtburchak
+            </button>
+            <button
+              onClick={() => {
+                const w = room.width, l = room.length;
+                // L-shakl: to'rtburchak + pastki-o'ng burchak kesib olingan
+                onResize({ shape: [
+                  {x:0,   y:0  }, {x:w,   y:0  }, {x:w,   y:l*0.5},
+                  {x:w*0.5,y:l*0.5},{x:w*0.5,y:l},{x:0,   y:l  },
+                ]});
+              }}
+              className={`px-1.5 py-1.5 rounded text-[10px] transition-colors ${
+                room.shape ? 'bg-blue-600 text-white' : 'bg-white/5 text-white/40 hover:bg-white/10'
+              }`}>
+              ⌐ L-shakl
+            </button>
+          </div>
+          {room.shape && (
+            <div className="text-[9px] text-white/20">
+              {room.shape.length} ta nuqta — drag qiling
+            </div>
+          )}
+        </div>
+
+        {/* Eshik / Deraza */}
+        <div className="space-y-1.5">
+          <div className="text-xs text-white/30 uppercase tracking-wider flex items-center justify-between">
+            <span>Eshik / Deraza</span>
+            <div className="flex gap-1">
+              {(['north','south','east','west'] as WallSide[]).map(side => (
+                <button key={side}
+                  title={`${side} devoriga eshik qo'sh`}
+                  onClick={() => onAddOpening({
+                    id: `op-${Date.now()}`,
+                    roomId: room.id,
+                    side,
+                    offset: 0.3,
+                    width: 0.9,
+                    type: 'door',
+                    swingIn: true,
+                  })}
+                  className="text-[9px] px-1 py-0.5 bg-white/5 hover:bg-white/10 rounded transition-colors text-white/40 hover:text-white/70">
+                  +🚪{side[0].toUpperCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+          {openings.length > 0 ? (
+            <div className="space-y-1">
+              {openings.map(op => (
+                <div key={op.id} className="flex items-center justify-between bg-white/5 rounded px-2 py-1">
+                  <span className="text-[10px] text-white/60">
+                    {op.type === 'door' ? '🚪' : '🪟'} {op.side} {op.width}m
+                  </span>
+                  <button onClick={() => onRemoveOpening(op.id)}
+                    className="text-red-400/50 hover:text-red-400 text-[10px] transition-colors">✕</button>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-[9px] text-white/20">Eshik/deraza yo'q — + tugmasini bosing</div>
+          )}
+        </div>
+
+        <div className="text-[9px] text-white/20 pt-1">
+          Backspace — o'chirish | 2x bosish — yangi xona
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PropertiesPanel({
   project,
   selectedId,
   selectedPipeId,
+  selectedRoomId,
   onRemove,
   onResize,
   onUpdatePipe,
   onRemovePipe,
+  onRenameRoom,
+  onChangeRoomType,
+  onResizeRoom,
+  onRemoveRoom,
+  onAddOpening,
+  onRemoveOpening,
 }: {
   project: PlumbingProject;
   selectedId: string | null;
   selectedPipeId: string | null;
+  selectedRoomId: string | null;
   onRemove: (id: string) => void;
   onResize: (id: string, dims: { w?: number; d?: number; h?: number }) => void;
   onUpdatePipe: (id: string, patch: Record<string, unknown>) => void;
   onRemovePipe: (id: string) => void;
+  onRenameRoom: (id: string, name: string) => void;
+  onChangeRoomType: (id: string, type: string) => void;
+  onResizeRoom: (id: string, dims: { width?: number; length?: number; shape?: Array<{x:number;y:number}>; position?: { x: number; y: number } }) => void;
+  onRemoveRoom: (id: string) => void;
+  onAddOpening: (o: PlumbingOpening) => void;
+  onRemoveOpening: (id: string) => void;
 }) {
   const fix  = project.fixtures.find(f => f.id === selectedId);
   const pipe = project.pipes.find(p => p.id === selectedPipeId);
+  const room = project.rooms.find(r => r.id === selectedRoomId);
+
+  // Xona tanlangan holat
+  if (!fix && !pipe && room) {
+    return (
+      <RoomPanel
+        room={room}
+        openings={(project.openings ?? []).filter(o => o.roomId === room.id)}
+        onRename={name => onRenameRoom(room.id, name)}
+        onChangeType={type => onChangeRoomType(room.id, type)}
+        onResize={dims => onResizeRoom(room.id, dims)}
+        onRemove={() => onRemoveRoom(room.id)}
+        onAddOpening={onAddOpening}
+        onRemoveOpening={onRemoveOpening}
+      />
+    );
+  }
 
   // Pipe tanlangan holat
   if (!fix && pipe) {
@@ -516,11 +971,20 @@ export default function PlumbingEditor() {
   }
 
   const [project, setProjectState] = useState<PlumbingProject | null>(null);
-  const projectRef = useRef<PlumbingProject | null>(null);
-  const setProject = (p: PlumbingProject | null) => {
+  const projectRef  = useRef<PlumbingProject | null>(null);
+  const undoStack   = useRef<PlumbingProject[]>([]);
+  const [undoCount, setUndoCount] = useState(0); // for toolbar indicator
+
+  // setProject — har chaqiruvda avvalgi holatni undo stack ga qo'shadi
+  const setProject = (p: PlumbingProject | null, pushUndo = true) => {
+    if (pushUndo && projectRef.current && p) {
+      undoStack.current = [...undoStack.current.slice(-49), projectRef.current];
+      setUndoCount(undoStack.current.length);
+    }
     projectRef.current = p;
     setProjectState(p);
   };
+
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState('');
 
@@ -528,10 +992,13 @@ export default function PlumbingEditor() {
   const [activeFloor, setActiveFloor] = useState(1);
   const [selectedId, setSelectedId]   = useState<string | null>(null);
   const [selectedPipeId, setSelectedPipeId] = useState<string | null>(null);
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(null);
   const [draggingLibType, setDraggingLibType] = useState<string | null>(null);
   const [drawPipeMode, setDrawPipeMode] = useState<{ type: string; material: string; diamMm: number } | null>(null);
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [showAIEdit, setShowAIEdit]   = useState(false);
+  const [snipCalcResult, setSnipCalcResult] = useState<{ notes: string[]; pipes: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<ContextMenuInfo | null>(null);
   const [showLayers, setShowLayers]   = useState(false);
   const [showLibrary, setShowLibrary] = useState(true);
   const [showProps, setShowProps]     = useState(true);
@@ -556,7 +1023,7 @@ export default function PlumbingEditor() {
       });
       const data = await res.json() as { project?: PlumbingProject; error?: string };
       if (!res.ok || !data.project) throw new Error(data.error ?? 'Loyiha topilmadi');
-      setProject(data.project);
+      setProject(data.project, false); // initial load — undo stack ga qo'shmaslik
       setActiveView(data.project.activeView ?? 'top');
       setActiveFloor(data.project.activeFloor ?? 1);
     } catch (e) {
@@ -565,6 +1032,38 @@ export default function PlumbingEditor() {
       setLoading(false);
     }
   }
+
+  const handleUndo = useCallback(async () => {
+    if (undoStack.current.length === 0) return;
+    const prev = undoStack.current[undoStack.current.length - 1];
+    undoStack.current = undoStack.current.slice(0, -1);
+    setUndoCount(undoStack.current.length);
+    // pushUndo=false — undo o'zini stackga qo'shmasin
+    setProject(prev, false);
+    // Server ga to'liq holatni saqlash
+    try {
+      const token = await getToken();
+      await fetch(apiUrl(`/api/plumbing/${id}/restore`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ project: prev }),
+      });
+    } catch {}
+  }, [id]);
+
+  // Ctrl+Z global listener
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const active = document.activeElement;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA')) return;
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [handleUndo]);
 
   const handleResizeFixture = useCallback(async (fixtureId: string, dims: { w?: number; d?: number; h?: number }) => {
     if (!id) return;
@@ -593,7 +1092,17 @@ export default function PlumbingEditor() {
   }, [id]);
 
   const handleRemoveFixture = useCallback(async (fixtureId: string) => {
-    if (!id || !project) return;
+    if (!id) return;
+    const cur = projectRef.current;
+    if (!cur) return;
+    // Optimistic: darhol o'chirib ko'rsatish
+    const optimistic: PlumbingProject = {
+      ...cur,
+      rooms: cur.rooms.map(r => ({ ...r, fixtureIds: r.fixtureIds.filter(fid => fid !== fixtureId) })),
+      fixtures: cur.fixtures.filter(f => f.id !== fixtureId),
+    };
+    setProject(optimistic);
+    setSelectedId(null);
     try {
       const token = await getToken();
       const res = await fetch(apiUrl(`/api/plumbing/${id}`), {
@@ -602,9 +1111,9 @@ export default function PlumbingEditor() {
         body: JSON.stringify({ action: 'remove_fixture', payload: { fixtureId } }),
       });
       const data = await res.json() as { project?: PlumbingProject };
-      if (data.project) { setProject(data.project); setSelectedId(null); }
+      if (data.project) setProject(data.project);
     } catch {}
-  }, [id, project]);
+  }, [id]);
 
   const handleMoveFixture = useCallback(async (fixtureId: string, newPos: { x: number; y: number; z: number }) => {
     if (!id) return;
@@ -635,6 +1144,24 @@ export default function PlumbingEditor() {
     } catch {
       // Server xato bo'lsa optimistic state qoladi (user ko'rmaydi)
     }
+  }, [id]);
+
+  const handleUpdateLabel = useCallback(async (key: string, override: { dx: number; dy: number; fontSize?: number } | null) => {
+    if (!id) return;
+    const cur = projectRef.current;
+    if (!cur) return;
+    const overrides = { ...(cur.labelOverrides ?? {}) };
+    if (override === null) { delete overrides[key]; }
+    else { overrides[key] = override; }
+    setProject({ ...cur, labelOverrides: overrides }, false); // undo ga qo'shmaslik (drag paytida)
+    try {
+      const token = await getToken();
+      await fetch(apiUrl(`/api/plumbing/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'update_label', payload: { key, override } }),
+      });
+    } catch (err) { console.error('label update error', err); }
   }, [id]);
 
   // Library element drop → canvas ga qo'yish (pozitsiya bilan)
@@ -757,6 +1284,211 @@ export default function PlumbingEditor() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ action: 'add_pipe', payload: { pipe: newPipe } }),
+      });
+    } catch {}
+  }, [id]);
+
+  // Xona nomini o'zgartirish
+  const handleRenameRoom = useCallback(async (roomId: string, name: string) => {
+    if (!id) return;
+    const cur = projectRef.current;
+    if (!cur) return;
+    const optimistic: PlumbingProject = {
+      ...cur,
+      rooms: cur.rooms.map(r => r.id === roomId ? { ...r, name } : r),
+    };
+    setProject(optimistic);
+    try {
+      const token = await getToken();
+      await fetch(apiUrl(`/api/plumbing/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'rename_room', payload: { roomId, name } }),
+      });
+    } catch {}
+  }, [id]);
+
+  const handleAddOpening = useCallback(async (opening: import('../engine/plumbing-types').PlumbingOpening) => {
+    if (!id) return;
+    const cur = projectRef.current;
+    if (!cur) return;
+    const optimistic: PlumbingProject = {
+      ...cur,
+      openings: [...(cur.openings ?? []), opening],
+    };
+    setProject(optimistic);
+    try {
+      const token = await getToken();
+      await fetch(apiUrl(`/api/plumbing/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'add_opening', payload: { opening } }),
+      });
+    } catch {}
+  }, [id]);
+
+  const handleRemoveOpening = useCallback(async (openingId: string) => {
+    if (!id) return;
+    const cur = projectRef.current;
+    if (!cur) return;
+    const optimistic: PlumbingProject = {
+      ...cur,
+      openings: (cur.openings ?? []).filter(o => o.id !== openingId),
+    };
+    setProject(optimistic);
+    try {
+      const token = await getToken();
+      await fetch(apiUrl(`/api/plumbing/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'remove_opening', payload: { openingId } }),
+      });
+    } catch {}
+  }, [id]);
+
+  const handleCalcDiameters = useCallback(async () => {
+    if (!id) return;
+    try {
+      const token = await getToken();
+      const res = await fetch(apiUrl(`/api/plumbing/${id}/calc-diameters`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json() as { project?: PlumbingProject; result?: { notes: string[]; pipes: Array<unknown> } };
+      if (data.project) setProject(data.project);
+      if (data.result) setSnipCalcResult({ notes: data.result.notes, pipes: data.result.pipes.length });
+      setTimeout(() => setSnipCalcResult(null), 6000);
+    } catch {}
+  }, [id]);
+
+  const handleMoveRiser = useCallback(async (riserId: string, pos: { x: number; y: number }) => {
+    if (!id) return;
+    const cur = projectRef.current;
+    if (!cur) return;
+    const optimistic: PlumbingProject = {
+      ...cur,
+      risers: cur.risers.map(r => r.id === riserId ? { ...r, x: pos.x, y: pos.y } : r),
+    };
+    setProject(optimistic);
+    try {
+      const token = await getToken();
+      await fetch(apiUrl(`/api/plumbing/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'move_riser', payload: { riserId, position: pos } }),
+      });
+    } catch {}
+  }, [id]);
+
+  const handleMoveRoom = useCallback(async (roomId: string, pos: { x: number; y: number }) => {
+    if (!id) return;
+    const cur = projectRef.current;
+    if (!cur) return;
+    const optimistic: PlumbingProject = {
+      ...cur,
+      rooms: cur.rooms.map(r => r.id === roomId ? { ...r, position: pos } : r),
+    };
+    setProject(optimistic);
+    try {
+      const token = await getToken();
+      await fetch(apiUrl(`/api/plumbing/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'move_room', payload: { roomId, position: pos } }),
+      });
+    } catch {}
+  }, [id]);
+
+  const handleResizeRoom = useCallback(async (roomId: string, dims: { width?: number; length?: number; shape?: Array<{x:number;y:number}>; position?: { x: number; y: number } }) => {
+    if (!id) return;
+    const cur = projectRef.current;
+    if (!cur) return;
+    const { position, ...rest } = dims;
+    const optimistic: PlumbingProject = {
+      ...cur,
+      rooms: cur.rooms.map(r => r.id === roomId
+        ? { ...r, ...rest, ...(position ? { position } : {}) }
+        : r
+      ),
+    };
+    setProject(optimistic);
+    try {
+      const token = await getToken();
+      await fetch(apiUrl(`/api/plumbing/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'resize_room', payload: { roomId, dims } }),
+      });
+    } catch {}
+  }, [id]);
+
+  const handleRemoveRoom = useCallback(async (roomId: string) => {
+    if (!id) return;
+    const cur = projectRef.current;
+    if (!cur) return;
+    const removedFixIds = cur.rooms.find(r => r.id === roomId)?.fixtureIds ?? [];
+    const optimistic: PlumbingProject = {
+      ...cur,
+      rooms: cur.rooms.filter(r => r.id !== roomId),
+      fixtures: cur.fixtures.filter(f => !removedFixIds.includes(f.id)),
+      pipes: cur.pipes.filter(p => !removedFixIds.some(fid => p.id.includes(fid))),
+    };
+    setProject(optimistic);
+    setSelectedRoomId(null);
+    try {
+      const token = await getToken();
+      await fetch(apiUrl(`/api/plumbing/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'remove_room', payload: { roomId } }),
+      });
+    } catch {}
+  }, [id]);
+
+  const handleAddRoom = useCallback(async (pos: { x: number; y: number }, floor: number) => {
+    if (!id) return;
+    const cur = projectRef.current;
+    if (!cur) return;
+    const newRoom = {
+      id: `room-manual-${Date.now()}`,
+      name: 'Yangi xona',
+      nameRu: 'Новое помещение',
+      type: 'other' as const,
+      floor,
+      position: pos,
+      width: 3,
+      length: 3,
+      height: cur.floorHeight,
+      fixtureIds: [],
+    };
+    const optimistic: PlumbingProject = { ...cur, rooms: [...cur.rooms, newRoom] };
+    setProject(optimistic);
+    setSelectedRoomId(newRoom.id);
+    try {
+      const token = await getToken();
+      await fetch(apiUrl(`/api/plumbing/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'add_room', payload: { room: newRoom } }),
+      });
+    } catch {}
+  }, [id]);
+
+  const handleChangeRoomType = useCallback(async (roomId: string, type: string) => {
+    if (!id) return;
+    const cur = projectRef.current;
+    if (!cur) return;
+    const optimistic: PlumbingProject = {
+      ...cur,
+      rooms: cur.rooms.map(r => r.id === roomId ? { ...r, type: type as PlumbingRoom['type'] } : r),
+    };
+    setProject(optimistic);
+    try {
+      const token = await getToken();
+      await fetch(apiUrl(`/api/plumbing/${id}`), {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'change_room_type', payload: { roomId, type } }),
       });
     } catch {}
   }, [id]);
@@ -892,6 +1624,29 @@ export default function PlumbingEditor() {
 
         <div className="flex-1" />
 
+        {/* Undo */}
+        <button
+          onClick={handleUndo}
+          disabled={undoCount === 0}
+          title="Ctrl+Z — Bekor qilish"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/5 hover:bg-white/10 disabled:opacity-30 disabled:cursor-not-allowed border border-white/10 rounded-lg text-xs transition-colors"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="9,14 4,9 9,4"/><path d="M20 20v-7a4 4 0 00-4-4H4"/>
+          </svg>
+          {undoCount > 0 && <span className="text-white/40">{undoCount}</span>}
+        </button>
+
+        {/* SNiP hisob */}
+        <button onClick={handleCalcDiameters}
+          title="SNiP 2.04.01-85 bo'yicha quvur diametrlarini qayta hisoblash"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs transition-colors">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/>
+          </svg>
+          SNiP
+        </button>
+
         {/* AI Edit */}
         <button onClick={() => setShowAIEdit(v => !v)}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${showAIEdit ? 'bg-orange-600 text-white' : 'bg-orange-600/20 text-orange-400 hover:bg-orange-600/40'}`}>
@@ -908,6 +1663,16 @@ export default function PlumbingEditor() {
             <line x1="12" y1="15" x2="12" y2="3"/>
           </svg>
           PDF
+        </button>
+        <button onClick={() => { import('../utils/exportPlumbingDXF').then(m => m.exportPlumbingDXF(project)); }}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-xs transition-colors"
+          title="AutoCAD DXF formatida eksport">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+            <polyline points="7,10 12,15 17,10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          DXF
         </button>
       </div>
 
@@ -951,18 +1716,27 @@ export default function PlumbingEditor() {
               activeFloor={activeFloor}
               selectedId={selectedId}
               selectedPipeId={selectedPipeId}
-              onSelectFixture={fid => { setSelectedId(fid); if (fid) setSelectedPipeId(null); }}
-              onSelectPipe={pid => { setSelectedPipeId(pid); if (pid) setSelectedId(null); }}
+              selectedRoomId={selectedRoomId}
+              onSelectFixture={fid => { setSelectedId(fid); if (fid) { setSelectedPipeId(null); setSelectedRoomId(null); } }}
+              onSelectPipe={pid => { setSelectedPipeId(pid); if (pid) { setSelectedId(null); setSelectedRoomId(null); } }}
+              onSelectRoom={rid => { setSelectedRoomId(rid); if (rid) { setSelectedId(null); setSelectedPipeId(null); } }}
+              onMoveRiser={handleMoveRiser}
               onMoveFixture={handleMoveFixture}
               onResizeFixture={handleResizeFixture}
               onRemoveFixture={handleRemoveFixture}
               onRemovePipe={handleRemovePipe}
+              onMoveRoom={handleMoveRoom}
+              onResizeRoom={handleResizeRoom}
+              onRemoveRoom={handleRemoveRoom}
+              onAddRoom={handleAddRoom}
               onMovePipeEndpoint={handleMovePipeEndpoint}
               onAddPipe={handleAddPipe}
               onDropFixture={handleDropFixture}
               draggingLibType={draggingLibType}
               drawPipeMode={drawPipeMode}
               layers={layerVis}
+              onShowContextMenu={setContextMenu}
+              onUpdateLabel={handleUpdateLabel}
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-white/30">
@@ -980,6 +1754,42 @@ export default function PlumbingEditor() {
               projectId={project.id}
               onUpdate={setProject}
               onClose={() => setShowAIEdit(false)}
+            />
+          )}
+
+          {/* SNiP natija toast */}
+          {snipCalcResult && (
+            <div className="absolute top-3 left-1/2 -translate-x-1/2 z-40 bg-emerald-900/95 border border-emerald-500/40 rounded-xl shadow-2xl px-4 py-3 max-w-md">
+              <div className="flex items-start gap-2.5">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34d399" strokeWidth="2" className="flex-shrink-0 mt-0.5">
+                  <polyline points="20,6 9,17 4,12"/>
+                </svg>
+                <div>
+                  <div className="text-sm font-medium text-emerald-300">SNiP hisob yakunlandi</div>
+                  <div className="text-xs text-emerald-400/70 mt-0.5">{snipCalcResult.pipes} ta quvur diametri yangilandi</div>
+                  {snipCalcResult.notes.slice(0, 3).map((n, i) => (
+                    <div key={i} className="text-[10px] text-emerald-400/50 mt-0.5">{n}</div>
+                  ))}
+                </div>
+                <button onClick={() => setSnipCalcResult(null)} className="text-emerald-400/50 hover:text-emerald-300 ml-1">×</button>
+              </div>
+            </div>
+          )}
+
+          {/* Context Menu */}
+          {contextMenu && (
+            <ContextMenu
+              info={contextMenu}
+              project={project}
+              onClose={() => setContextMenu(null)}
+              onRenameRoom={handleRenameRoom}
+              onChangeRoomType={handleChangeRoomType}
+              onResizeRoom={handleResizeRoom}
+              onRemoveRoom={handleRemoveRoom}
+              onAddRoom={handleAddRoom}
+              onRemoveFixture={handleRemoveFixture}
+              onRemovePipe={handleRemovePipe}
+              activeFloor={activeFloor}
             />
           )}
 
@@ -1001,10 +1811,17 @@ export default function PlumbingEditor() {
             project={project}
             selectedId={selectedId}
             selectedPipeId={selectedPipeId}
+            selectedRoomId={selectedRoomId}
             onRemove={handleRemoveFixture}
             onResize={handleResizeFixture}
             onUpdatePipe={handleUpdatePipe}
             onRemovePipe={handleRemovePipe}
+            onRenameRoom={handleRenameRoom}
+            onChangeRoomType={handleChangeRoomType}
+            onResizeRoom={handleResizeRoom}
+            onRemoveRoom={handleRemoveRoom}
+            onAddOpening={handleAddOpening}
+            onRemoveOpening={handleRemoveOpening}
           />
         )}
       </div>

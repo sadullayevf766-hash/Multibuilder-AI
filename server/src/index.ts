@@ -999,7 +999,7 @@ app.post('/api/generate-facade', requireCredits('super_generate'), async (req, r
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { PlumbingAIParser } from './ai/PlumbingAIParser';
-import { PlumbingProjectEngine } from './engine/PlumbingProjectEngine';
+import { PlumbingProjectEngine, FIXTURE_CATALOG, addVec3Rotated } from './engine/PlumbingProjectEngine';
 import { PlumbingStore } from './store/PlumbingStore';
 import type { PlumbingProject, PlumbingProjectSpec } from './engine/PlumbingProjectEngine';
 
@@ -1077,8 +1077,9 @@ app.patch('/api/plumbing/:id', async (req, res) => {
     const { action, payload } = req.body;
 
     const userId  = await getPlumbingUserId(req.headers.authorization);
-    let project   = await plumbingStore.get(userId, id);
-    if (!project) return res.status(404).json({ error: 'Loyiha topilmadi' });
+    const projectRaw = await plumbingStore.get(userId, id);
+    if (!projectRaw) return res.status(404).json({ error: 'Loyiha topilmadi' });
+    let project = projectRaw;
 
     if (action === 'add_fixture') {
       const { roomId, type, position } = payload;
@@ -1091,11 +1092,19 @@ app.patch('/api/plumbing/:id', async (req, res) => {
       const { fixtureId, dimensions } = payload as { fixtureId: string; dimensions: { w: number; d: number; h: number } };
       project = {
         ...project,
-        fixtures: project.fixtures.map(f =>
-          f.id === fixtureId
-            ? { ...f, dimensions: { ...f.dimensions, ...dimensions }, isManual: true }
-            : f
-        ),
+        fixtures: project.fixtures.map(f => {
+          if (f.id !== fixtureId) return f;
+          const meta = FIXTURE_CATALOG[f.type as keyof typeof FIXTURE_CATALOG];
+          return {
+            ...f,
+            dimensions: { ...f.dimensions, ...dimensions },
+            // Ulanish nuqtalarini rotation bilan qayta hisoblash
+            coldIn:   meta?.coldOffset  ? addVec3Rotated(f.position, meta.coldOffset,  f.rotation) : f.coldIn,
+            hotIn:    meta?.hotOffset   ? addVec3Rotated(f.position, meta.hotOffset,   f.rotation) : f.hotIn,
+            drainOut: meta?.drainOffset ? addVec3Rotated(f.position, meta.drainOffset, f.rotation) : f.drainOut,
+            isManual: true,
+          };
+        }),
         updatedAt: new Date().toISOString(),
       };
     } else if (action === 'remove_pipe') {
@@ -1119,6 +1128,82 @@ app.patch('/api/plumbing/:id', async (req, res) => {
         pipes: [...project.pipes, pipe],
         updatedAt: new Date().toISOString(),
       };
+    } else if (action === 'rename_room') {
+      const { roomId, name } = payload as { roomId: string; name: string };
+      project = {
+        ...project,
+        rooms: project.rooms.map(r => r.id === roomId ? { ...r, name } : r),
+        updatedAt: new Date().toISOString(),
+      };
+    } else if (action === 'move_riser') {
+      const { riserId, position } = payload as { riserId: string; position: { x: number; y: number } };
+      project = {
+        ...project,
+        risers: project.risers.map(r => r.id === riserId ? { ...r, x: position.x, y: position.y } : r),
+        updatedAt: new Date().toISOString(),
+      };
+    } else if (action === 'move_room') {
+      const { roomId, position } = payload as { roomId: string; position: { x: number; y: number } };
+      project = {
+        ...project,
+        rooms: project.rooms.map(r => r.id === roomId ? { ...r, position } : r),
+        updatedAt: new Date().toISOString(),
+      };
+    } else if (action === 'resize_room') {
+      const { roomId, dims } = payload as { roomId: string; dims: { width?: number; length?: number; shape?: Array<{x:number;y:number}>; position?: { x: number; y: number } } };
+      const { position, ...rest } = dims;
+      project = {
+        ...project,
+        rooms: project.rooms.map(r => r.id === roomId
+          ? { ...r, ...rest, ...(position ? { position } : {}) }
+          : r
+        ),
+        updatedAt: new Date().toISOString(),
+      };
+    } else if (action === 'remove_room') {
+      const { roomId } = payload as { roomId: string };
+      const removedFixtureIds = project.rooms.find(r => r.id === roomId)?.fixtureIds ?? [];
+      project = {
+        ...project,
+        rooms: project.rooms.filter(r => r.id !== roomId),
+        fixtures: project.fixtures.filter(f => !removedFixtureIds.includes(f.id)),
+        pipes: project.pipes.filter(p => !removedFixtureIds.some(fid => p.id.includes(fid))),
+        updatedAt: new Date().toISOString(),
+      };
+    } else if (action === 'add_room') {
+      const { room } = payload as { room: typeof project.rooms[0] };
+      project = {
+        ...project,
+        rooms: [...project.rooms, room],
+        updatedAt: new Date().toISOString(),
+      };
+    } else if (action === 'change_room_type') {
+      const { roomId, type } = payload as { roomId: string; type: string };
+      project = {
+        ...project,
+        rooms: project.rooms.map(r => r.id === roomId ? { ...r, type: type as typeof r.type } : r),
+        updatedAt: new Date().toISOString(),
+      };
+    } else if (action === 'add_opening') {
+      const { opening } = payload as { opening: import('./engine/PlumbingProjectEngine').PlumbingOpening };
+      project = {
+        ...project,
+        openings: [...(project.openings ?? []), opening],
+        updatedAt: new Date().toISOString(),
+      };
+    } else if (action === 'remove_opening') {
+      const { openingId } = payload as { openingId: string };
+      project = {
+        ...project,
+        openings: (project.openings ?? []).filter(o => o.id !== openingId),
+        updatedAt: new Date().toISOString(),
+      };
+    } else if (action === 'update_label') {
+      const { key, override } = payload as { key: string; override: { dx: number; dy: number; fontSize?: number; hidden?: boolean } | null };
+      const overrides = { ...(project.labelOverrides ?? {}) };
+      if (override === null) { delete overrides[key]; }
+      else { overrides[key] = override; }
+      project = { ...project, labelOverrides: overrides, updatedAt: new Date().toISOString() };
     } else if (action === 'update_name') {
       project = { ...project, name: payload.name, updatedAt: new Date().toISOString() };
     } else if (action === 'update_layer') {
@@ -1133,6 +1218,59 @@ app.patch('/api/plumbing/:id', async (req, res) => {
   } catch (err) {
     console.error('[PLUMBING] patch error:', err);
     res.status(500).json({ error: 'O\'zgartirishda xatolik', message: (err as Error).message });
+  }
+});
+
+// POST /api/plumbing/:id/restore — to'liq project holatini tiklash (undo)
+app.post('/api/plumbing/:id/restore', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { project } = req.body as { project: PlumbingProject };
+    if (!project || project.id !== id) return res.status(400).json({ error: 'project id mismatch' });
+    const userId = await getPlumbingUserId(req.headers.authorization);
+    await plumbingStore.save(userId, { ...project, updatedAt: new Date().toISOString() });
+    return res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST /api/plumbing/:id/calc-diameters — SNiP bo'yicha diametr hisob
+app.post('/api/plumbing/:id/calc-diameters', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId  = await getPlumbingUserId(req.headers.authorization);
+    let project   = await plumbingStore.get(userId, id);
+    if (!project) return res.status(404).json({ error: 'Loyiha topilmadi' });
+
+    const { calcProjectDiameters } = await import('./engine/SNiPCalculator');
+    const result = calcProjectDiameters(
+      project.fixtures as Parameters<typeof calcProjectDiameters>[0],
+      project.pipes,
+      project.floorCount,
+    );
+
+    // Diametrlarni yangilash
+    if (result.pipes.length > 0) {
+      const patchMap = Object.fromEntries(result.pipes.map(p => [p.pipeId, p.newDiamMm]));
+      project = {
+        ...project,
+        pipes: project.pipes.map(p => patchMap[p.id] ? { ...p, diamMm: patchMap[p.id] } : p),
+        stats: {
+          ...project.stats,
+          mainColdDiamMm: result.mainColdDiamMm,
+          mainHotDiamMm:  result.mainHotDiamMm,
+        },
+        notes: [...(project.notes ?? []), ...result.notes],
+        updatedAt: new Date().toISOString(),
+      };
+      await plumbingStore.save(userId, project);
+    }
+
+    return res.json({ project, result });
+  } catch (err) {
+    console.error('[SNiP calc] error:', err);
+    res.status(500).json({ error: (err as Error).message });
   }
 });
 
